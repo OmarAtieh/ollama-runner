@@ -63,9 +63,26 @@ class BinaryManager:
             "progress": self._download_progress,
         }
 
-    async def get_latest_release_url(self) -> str | None:
-        """Query GitHub API for the latest llama.cpp release and return the
-        Windows CUDA zip asset URL, or None on failure."""
+    def _detect_cuda_version(self) -> str:
+        """Detect installed CUDA version from nvidia-smi."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["nvidia-smi"], capture_output=True, text=True, timeout=10,
+            )
+            # Parse "CUDA Version: 13.1" from output
+            for line in result.stdout.splitlines():
+                if "CUDA Version:" in line:
+                    import re
+                    match = re.search(r"CUDA Version:\s*([\d.]+)", line)
+                    if match:
+                        return match.group(1)
+        except Exception:
+            pass
+        return "12.4"  # fallback
+
+    async def _fetch_release_data(self) -> dict | None:
+        """Fetch latest release data from GitHub."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -75,25 +92,88 @@ class BinaryManager:
                     if resp.status != 200:
                         log.warning("GitHub API returned status %s", resp.status)
                         return None
-                    data = await resp.json()
+                    return await resp.json()
         except Exception as exc:
             log.error("Failed to query GitHub releases: %s", exc)
             return None
 
-        assets = data.get("assets", [])
-        candidates: list[dict] = []
-        for asset in assets:
-            name: str = asset.get("name", "").lower()
-            if name.endswith(".zip") and "win" in name and "cuda" in name:
-                candidates.append(asset)
-
-        if not candidates:
+    async def get_latest_release_url(self) -> str | None:
+        """Query GitHub API for the latest llama.cpp release and return the
+        Windows CUDA zip asset URL, or None on failure."""
+        data = await self._fetch_release_data()
+        if not data:
             return None
 
-        # Prefer non-vulkan builds
-        non_vulkan = [a for a in candidates if "vulkan" not in a["name"].lower()]
-        chosen = non_vulkan[0] if non_vulkan else candidates[0]
-        return chosen["browser_download_url"]
+        cuda_ver = self._detect_cuda_version()
+        # Normalize: "13.1" -> "13.1", try to match against asset names
+        cuda_major_minor = cuda_ver  # e.g. "13.1" or "12.4"
+
+        assets = data.get("assets", [])
+
+        # Find the main binary zip (not cudart)
+        def find_binary(cuda_tag: str) -> str | None:
+            for asset in assets:
+                name: str = asset.get("name", "").lower()
+                if (name.endswith(".zip") and "win" in name and
+                    "cuda" in name and cuda_tag in name and
+                    "vulkan" not in name and "cudart" not in name):
+                    return asset["browser_download_url"]
+            return None
+
+        # Try exact CUDA version match first, then fallback
+        url = find_binary(f"cuda-{cuda_major_minor}")
+        if not url:
+            url = find_binary("cuda-12.4")  # widely compatible fallback
+        if not url:
+            url = find_binary("cuda")  # any CUDA build
+        return url
+
+    async def _get_cudart_url(self) -> str | None:
+        """Get the CUDA runtime DLL zip URL matching our CUDA version."""
+        data = await self._fetch_release_data()
+        if not data:
+            return None
+
+        cuda_ver = self._detect_cuda_version()
+        assets = data.get("assets", [])
+
+        def find_cudart(cuda_tag: str) -> str | None:
+            for asset in assets:
+                name: str = asset.get("name", "").lower()
+                if (name.endswith(".zip") and "win" in name and
+                    "cudart" in name and cuda_tag in name):
+                    return asset["browser_download_url"]
+            return None
+
+        url = find_cudart(f"cuda-{cuda_ver}")
+        if not url:
+            url = find_cudart("cuda-12.4")
+        return url
+
+    async def _download_file(self, url: str, dest: Path, label: str = "") -> bool:
+        """Download a file with progress tracking."""
+        try:
+            timeout = aiohttp.ClientTimeout(total=600)  # 10 min timeout
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        log.error("Download %s failed with status %s", label, resp.status)
+                        return False
+
+                    total = int(resp.headers.get("Content-Length", 0))
+                    downloaded = 0
+
+                    with open(dest, "wb") as f:
+                        async for chunk in resp.content.iter_chunked(65536):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total > 0:
+                                self._download_progress = downloaded / total
+
+            return True
+        except Exception as exc:
+            log.error("Download %s failed: %s", label, exc)
+            return False
 
     async def download_and_install(self) -> bool:
         """Download and extract llama-server into bin_dir. Returns True on success."""
@@ -107,34 +187,35 @@ class BinaryManager:
             return False
 
         zip_path = self._bin_dir / "llama-server.zip"
+        cudart_zip_path = self._bin_dir / "cudart.zip"
 
         try:
-            # -- Download with progress tracking ---------------------------------
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        log.error("Download failed with status %s", resp.status)
-                        self._download_status = "error"
-                        return False
-
-                    total = int(resp.headers.get("Content-Length", 0))
-                    downloaded = 0
-
-                    with open(zip_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(8192):
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if total > 0:
-                                self._download_progress = downloaded / total
+            # -- Download main binary --------------------------------------------
+            log.info("Downloading llama-server from %s", url)
+            if not await self._download_file(url, zip_path, "llama-server"):
+                self._download_status = "error"
+                return False
 
             self._download_progress = 1.0
 
-            # -- Extract ---------------------------------------------------------
+            # -- Extract main binary ---------------------------------------------
             self._download_status = "extracting"
             self._extract_zip(zip_path)
-
-            # -- Clean up --------------------------------------------------------
             zip_path.unlink(missing_ok=True)
+
+            # -- Download CUDA runtime DLLs if needed ----------------------------
+            cudart_url = await self._get_cudart_url()
+            if cudart_url:
+                log.info("Downloading CUDA runtime DLLs...")
+                self._download_status = "downloading"
+                self._download_progress = 0.0
+                if await self._download_file(cudart_url, cudart_zip_path, "cudart"):
+                    self._download_status = "extracting"
+                    self._extract_zip(cudart_zip_path)
+                    cudart_zip_path.unlink(missing_ok=True)
+                else:
+                    log.warning("CUDA runtime download failed, llama-server may still work if CUDA is installed system-wide")
+                    cudart_zip_path.unlink(missing_ok=True)
 
             # -- Verify ----------------------------------------------------------
             if self._binary_path.exists():
@@ -150,6 +231,7 @@ class BinaryManager:
             log.error("Download/install failed: %s", exc)
             self._download_status = "error"
             zip_path.unlink(missing_ok=True)
+            cudart_zip_path.unlink(missing_ok=True)
             return False
 
     # -- Private helpers -----------------------------------------------------
