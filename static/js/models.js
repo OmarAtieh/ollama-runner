@@ -21,7 +21,10 @@ export class ModelManager {
 
     _bindEvents() {
         // Open modal
-        document.getElementById('btn-model-picker').addEventListener('click', () => this.open());
+        document.getElementById('btn-model-picker').addEventListener('click', (e) => {
+            e.preventDefault();
+            this.open();
+        });
 
         // Close modal
         this.modal.querySelectorAll('.modal-close, .modal-overlay').forEach(el => {
@@ -38,6 +41,17 @@ export class ModelManager {
         document.getElementById('btn-load-model').addEventListener('click', () => this._loadFromSidebar());
         document.getElementById('btn-unload-model').addEventListener('click', () => this._unloadModel());
 
+        // Sidebar model section collapse/expand
+        document.getElementById('model-section-toggle').addEventListener('click', () => this._toggleModelExpanded());
+
+        // Sidebar inline sliders
+        this._bindSidebarSlider('sidebar-slider-temp', 'sidebar-temp-val', false);
+        this._bindSidebarSlider('sidebar-slider-ctx', 'sidebar-ctx-val', true);
+        this._bindSidebarSlider('sidebar-slider-gpu', 'sidebar-gpu-val', true);
+
+        // Sidebar reload button
+        document.getElementById('btn-sidebar-reload').addEventListener('click', () => this._sidebarReload());
+
         // Slider + input sync for model config
         this._syncSliderInput('slider-gpu-layers', 'input-gpu-layers', 'gpu-layers-value', true);
         this._syncSliderInput('slider-ctx-length', 'input-ctx-length', 'ctx-length-value', true);
@@ -52,6 +66,43 @@ export class ModelManager {
 
         // Delete model
         document.getElementById('btn-delete-model').addEventListener('click', () => this._deleteSelectedModel());
+    }
+
+    _toggleModelExpanded() {
+        const expanded = document.getElementById('sidebar-model-expanded');
+        const chevron = document.querySelector('.model-toggle-chevron');
+        const isVisible = expanded.style.display !== 'none';
+        expanded.style.display = isVisible ? 'none' : 'flex';
+        chevron.classList.toggle('expanded', !isVisible);
+    }
+
+    _bindSidebarSlider(sliderId, valId, isInt) {
+        const slider = document.getElementById(sliderId);
+        const valEl = document.getElementById(valId);
+        slider.addEventListener('input', () => {
+            const v = isInt ? parseInt(slider.value) : parseFloat(slider.value);
+            valEl.textContent = v;
+        });
+    }
+
+    async _sidebarReload() {
+        if (!this._selectedRegistryId) {
+            this.state.showToast('No model selected', 'error');
+            return;
+        }
+        // Save inline slider values to model config, then reload
+        try {
+            await this.api.updateModel(this._selectedRegistryId, {
+                temperature: parseFloat(document.getElementById('sidebar-slider-temp').value),
+                context_default: parseInt(document.getElementById('sidebar-slider-ctx').value),
+                gpu_layers: parseInt(document.getElementById('sidebar-slider-gpu').value),
+            });
+            this.state.showToast('Config saved, reloading...', 'success');
+            const ctxLength = parseInt(document.getElementById('sidebar-slider-ctx').value);
+            await this._loadModel(this._selectedRegistryId, ctxLength);
+        } catch (err) {
+            this.state.showToast('Reload failed: ' + err.message, 'error');
+        }
     }
 
     /**
@@ -478,6 +529,7 @@ export class ModelManager {
                     progressBar.style.width = '100%';
                     progressText.textContent = 'Loaded';
                     this._updateModelDisplay(status);
+                    this._syncSidebarSliders();
                     this.state.showToast('Model loaded', 'success');
                 } else if (status.error) {
                     throw new Error(status.error);
@@ -576,6 +628,26 @@ export class ModelManager {
         }
     }
 
+    _syncSidebarSliders() {
+        // Populate sidebar inline sliders from the currently selected registry model
+        if (!this._selectedRegistryId || !this.state.registryModels) return;
+        const model = this.state.registryModels.find(m => m.id === this._selectedRegistryId);
+        if (!model) return;
+        const setSlider = (id, valId, value) => {
+            const s = document.getElementById(id);
+            const v = document.getElementById(valId);
+            if (s && v) { s.value = value; v.textContent = value; }
+        };
+        setSlider('sidebar-slider-temp', 'sidebar-temp-val', model.temperature);
+        setSlider('sidebar-slider-ctx', 'sidebar-ctx-val', model.context_default);
+        setSlider('sidebar-slider-gpu', 'sidebar-gpu-val', model.gpu_layers);
+        // Update ctx slider max
+        if (model.context_max) {
+            const ctxSlider = document.getElementById('sidebar-slider-ctx');
+            if (ctxSlider) ctxSlider.max = model.context_max;
+        }
+    }
+
     async refreshStatus() {
         try {
             const status = await this.api.getModelStatus();
@@ -589,6 +661,7 @@ export class ModelManager {
             const models = await this.api.getRegistry();
             this.state.registryModels = models;
             document.getElementById('btn-load-model').disabled = models.length === 0;
+            this._syncSidebarSliders();
         } catch {}
     }
 

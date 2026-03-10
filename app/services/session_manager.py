@@ -41,15 +41,35 @@ class SessionManager:
             await db.execute("PRAGMA synchronous=NORMAL")
             await db.execute(
                 """
-                CREATE TABLE IF NOT EXISTS sessions (
+                CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    model_id TEXT,
+                    name TEXT NOT NULL,
+                    color TEXT NOT NULL DEFAULT '#6c8cff',
+                    system_prompt TEXT DEFAULT '',
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 )
                 """
             )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    model_id TEXT,
+                    project_id TEXT DEFAULT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            # Migration: add project_id column if missing (existing DBs)
+            cursor = await db.execute("PRAGMA table_info(sessions)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "project_id" not in columns:
+                await db.execute(
+                    "ALTER TABLE sessions ADD COLUMN project_id TEXT DEFAULT NULL"
+                )
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS messages (
@@ -77,20 +97,111 @@ class SessionManager:
         """Return a new aiosqlite connection context manager with foreign keys enabled."""
         return _ConnectionContext(str(self._db_path))
 
-    async def create_session(self, title: str, model_id: str | None = None) -> dict:
+    # ── Project CRUD ─────────────────────────────────────────────
+
+    async def create_project(self, name: str, color: str = "#6c8cff", system_prompt: str = "") -> dict:
+        """Create a new project folder."""
+        project_id = uuid.uuid4().hex[:8]
+        now = time.time()
+        async with self._connect() as db:
+            await db.execute(
+                "INSERT INTO projects (id, name, color, system_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (project_id, name, color, system_prompt, now, now),
+            )
+            await db.commit()
+        return {
+            "id": project_id,
+            "name": name,
+            "color": color,
+            "system_prompt": system_prompt,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    async def list_projects(self) -> list[dict]:
+        """Return all projects ordered by name."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT id, name, color, system_prompt, created_at, updated_at FROM projects ORDER BY name ASC"
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "id": row[0],
+                "name": row[1],
+                "color": row[2],
+                "system_prompt": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
+            }
+            for row in rows
+        ]
+
+    async def update_project(
+        self, project_id: str, name: str | None = None, color: str | None = None, system_prompt: str | None = None
+    ) -> dict | None:
+        """Update a project's fields. Returns updated project or None."""
+        now = time.time()
+        async with self._connect() as db:
+            if name is not None:
+                await db.execute(
+                    "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+                    (name, now, project_id),
+                )
+            if color is not None:
+                await db.execute(
+                    "UPDATE projects SET color = ?, updated_at = ? WHERE id = ?",
+                    (color, now, project_id),
+                )
+            if system_prompt is not None:
+                await db.execute(
+                    "UPDATE projects SET system_prompt = ?, updated_at = ? WHERE id = ?",
+                    (system_prompt, now, project_id),
+                )
+            await db.commit()
+            cursor = await db.execute(
+                "SELECT id, name, color, system_prompt, created_at, updated_at FROM projects WHERE id = ?",
+                (project_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "name": row[1],
+            "color": row[2],
+            "system_prompt": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
+        }
+
+    async def delete_project(self, project_id: str) -> None:
+        """Delete a project. Sessions in this project get project_id set to NULL."""
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE sessions SET project_id = NULL WHERE project_id = ?",
+                (project_id,),
+            )
+            await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            await db.commit()
+
+    # ── Session CRUD ──────────────────────────────────────────────
+
+    async def create_session(self, title: str, model_id: str | None = None, project_id: str | None = None) -> dict:
         """Create a new session with a short UUID (8 chars)."""
         session_id = uuid.uuid4().hex[:8]
         now = time.time()
         async with self._connect() as db:
             await db.execute(
-                "INSERT INTO sessions (id, title, model_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, title, model_id, now, now),
+                "INSERT INTO sessions (id, title, model_id, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, title, model_id, project_id, now, now),
             )
             await db.commit()
         return {
             "id": session_id,
             "title": title,
             "model_id": model_id,
+            "project_id": project_id,
             "created_at": now,
             "updated_at": now,
         }
@@ -99,7 +210,7 @@ class SessionManager:
         """Return all sessions ordered by updated_at DESC."""
         async with self._connect() as db:
             cursor = await db.execute(
-                "SELECT id, title, model_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+                "SELECT id, title, model_id, project_id, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
             )
             rows = await cursor.fetchall()
         return [
@@ -107,8 +218,9 @@ class SessionManager:
                 "id": row[0],
                 "title": row[1],
                 "model_id": row[2],
-                "created_at": row[3],
-                "updated_at": row[4],
+                "project_id": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
             }
             for row in rows
         ]
@@ -117,7 +229,7 @@ class SessionManager:
         """Get a single session by ID, or None if not found."""
         async with self._connect() as db:
             cursor = await db.execute(
-                "SELECT id, title, model_id, created_at, updated_at FROM sessions WHERE id = ?",
+                "SELECT id, title, model_id, project_id, created_at, updated_at FROM sessions WHERE id = ?",
                 (session_id,),
             )
             row = await cursor.fetchone()
@@ -127,14 +239,19 @@ class SessionManager:
             "id": row[0],
             "title": row[1],
             "model_id": row[2],
-            "created_at": row[3],
-            "updated_at": row[4],
+            "project_id": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
         }
 
     async def update_session(
-        self, session_id: str, title: str | None = None, model_id: str | None = None
+        self, session_id: str, title: str | None = None, model_id: str | None = None, project_id: str | None = "__unset__"
     ) -> None:
-        """Update session title and/or model_id."""
+        """Update session title, model_id, and/or project_id.
+
+        project_id uses a sentinel default so that passing None explicitly
+        clears the project (moves session to Unsorted).
+        """
         now = time.time()
         async with self._connect() as db:
             if title is not None:
@@ -146,6 +263,11 @@ class SessionManager:
                 await db.execute(
                     "UPDATE sessions SET model_id = ?, updated_at = ? WHERE id = ?",
                     (model_id, now, session_id),
+                )
+            if project_id != "__unset__":
+                await db.execute(
+                    "UPDATE sessions SET project_id = ?, updated_at = ? WHERE id = ?",
+                    (project_id, now, session_id),
                 )
             await db.commit()
 

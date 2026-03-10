@@ -17,7 +17,7 @@ from pathlib import Path
 from app.config import ensure_dirs, load_config
 from app.routers.system import router as system_router
 from app.routers.models import router as models_router
-from app.routers.sessions import router as sessions_router
+from app.routers.sessions import router as sessions_router, projects_router
 from app.routers.chat import router as chat_router
 from app.routers.config import router as config_router
 from app.services.session_manager import SessionManager
@@ -70,6 +70,7 @@ app = FastAPI(title="OllamaRunner", version="0.1.0", lifespan=lifespan)
 app.include_router(system_router)
 app.include_router(models_router)
 app.include_router(sessions_router)
+app.include_router(projects_router)
 app.include_router(chat_router)
 app.include_router(config_router)
 

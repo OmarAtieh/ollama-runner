@@ -1271,6 +1271,269 @@ select.input {
     to { transform: translateX(0); opacity: 1; }
 }
 
+/* ===== Compact Sidebar Model Section ===== */
+.sidebar-model-compact .model-toggle-label {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+
+.model-toggle-chevron {
+    font-size: 10px;
+    transition: transform 0.2s ease;
+    color: var(--text-muted);
+}
+
+.model-toggle-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.sidebar-model-link {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 15px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color var(--transition);
+    flex-shrink: 0;
+}
+
+.sidebar-model-link:hover {
+    color: var(--accent);
+}
+
+.sidebar-model-expanded {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.sidebar-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sidebar-slider-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    width: 30px;
+    flex-shrink: 0;
+    letter-spacing: 0.3px;
+}
+
+.sidebar-slider-row input[type="range"] {
+    flex: 1;
+    height: 3px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    outline: none;
+}
+
+.sidebar-slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid var(--bg-sidebar);
+}
+
+.sidebar-slider-val {
+    font-size: 10px;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    min-width: 32px;
+    text-align: right;
+}
+
+/* ===== Project Folders ===== */
+.project-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.project-folder {
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+}
+
+.project-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: all var(--transition);
+    user-select: none;
+}
+
+.project-header:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.project-header.active {
+    background: var(--accent-subtle);
+    color: var(--text-primary);
+}
+
+.project-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.project-chevron {
+    font-size: 9px;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    margin-left: auto;
+}
+
+.project-chevron.expanded {
+    transform: rotate(90deg);
+}
+
+.project-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.project-session-count {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.project-sessions {
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.project-sessions .session-item {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.project-delete {
+    opacity: 0;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 0 3px;
+    transition: all var(--transition);
+}
+
+.project-header:hover .project-delete {
+    opacity: 1;
+}
+
+.project-delete:hover {
+    color: var(--danger);
+}
+
+/* ===== Color Swatches ===== */
+.color-swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all var(--transition);
+}
+
+.color-swatch:hover {
+    transform: scale(1.15);
+}
+
+.color-swatch.selected {
+    border-color: var(--text-primary);
+    box-shadow: 0 0 0 2px var(--bg-main), 0 0 0 4px currentColor;
+}
+
+/* ===== Context Menu ===== */
+.context-menu {
+    position: fixed;
+    z-index: 2000;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    min-width: 180px;
+    max-width: 250px;
+    padding: 6px 0;
+    backdrop-filter: blur(12px);
+}
+
+.context-menu-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.8px;
+    padding: 6px 14px;
+    font-weight: 600;
+}
+
+.context-menu-items {
+    display: flex;
+    flex-direction: column;
+}
+
+.context-menu-item {
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all var(--transition);
+}
+
+.context-menu-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.context-menu-item .project-dot {
+    width: 6px;
+    height: 6px;
+}
+
 /* ===== Empty State ===== */
 .empty-state {
     color: var(--text-muted);

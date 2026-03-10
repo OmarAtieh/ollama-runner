@@ -22,27 +22,51 @@
             </div>
 
             <div class="sidebar-section">
+                <div class="section-label">Projects</div>
+                <div id="project-list" class="project-list"></div>
+                <button id="btn-add-project" class="btn btn-secondary btn-sm" style="margin-top:6px;width:100%;">+ New Project</button>
+            </div>
+
+            <div class="sidebar-section">
                 <div class="section-label">Sessions</div>
                 <div id="session-list" class="session-list"></div>
             </div>
 
-            <div class="sidebar-section">
-                <div class="section-label">Model</div>
+            <div class="sidebar-section sidebar-model-compact">
+                <div class="section-label model-toggle-label" id="model-section-toggle">Model <span class="model-toggle-chevron">&#9656;</span></div>
                 <div id="model-info" class="model-info">
                     <div class="model-status-row">
                         <span id="model-status-dot" class="status-dot offline"></span>
                         <div id="current-model-name" class="model-name">No model loaded</div>
+                        <a id="btn-model-picker" class="sidebar-model-link" title="Select Model">&#9881;</a>
                     </div>
-                    <div id="sidebar-model-caps" class="model-list-item-caps" style="margin-top:2px;"></div>
-                    <div id="model-status-text" class="model-status-text"></div>
-                    <button id="btn-model-picker" class="btn btn-secondary btn-block">Select Model</button>
-                    <div class="model-actions">
-                        <button id="btn-load-model" class="btn btn-accent btn-sm" disabled>Load</button>
-                        <button id="btn-unload-model" class="btn btn-danger btn-sm" disabled>Unload</button>
-                    </div>
-                    <div id="model-progress-container" class="progress-container" style="display:none;">
-                        <div id="model-progress-bar" class="progress-bar progress-bar-animated"></div>
-                        <div id="model-progress-text" class="progress-text">Loading...</div>
+                    <div id="sidebar-model-expanded" class="sidebar-model-expanded" style="display:none;">
+                        <div id="sidebar-model-caps" class="model-list-item-caps" style="margin-top:2px;"></div>
+                        <div id="model-status-text" class="model-status-text"></div>
+                        <div class="sidebar-slider-row">
+                            <span class="sidebar-slider-label">Temp</span>
+                            <input type="range" id="sidebar-slider-temp" min="0" max="2" step="0.05" value="0.7">
+                            <span id="sidebar-temp-val" class="sidebar-slider-val">0.7</span>
+                        </div>
+                        <div class="sidebar-slider-row">
+                            <span class="sidebar-slider-label">Ctx</span>
+                            <input type="range" id="sidebar-slider-ctx" min="512" max="65536" step="512" value="4096">
+                            <span id="sidebar-ctx-val" class="sidebar-slider-val">4096</span>
+                        </div>
+                        <div class="sidebar-slider-row">
+                            <span class="sidebar-slider-label">GPU</span>
+                            <input type="range" id="sidebar-slider-gpu" min="-1" max="100" value="-1">
+                            <span id="sidebar-gpu-val" class="sidebar-slider-val">-1</span>
+                        </div>
+                        <div class="model-actions">
+                            <button id="btn-load-model" class="btn btn-accent btn-sm" disabled>Load</button>
+                            <button id="btn-unload-model" class="btn btn-danger btn-sm" disabled>Unload</button>
+                            <button id="btn-sidebar-reload" class="btn btn-primary btn-sm">Reload</button>
+                        </div>
+                        <div id="model-progress-container" class="progress-container" style="display:none;">
+                            <div id="model-progress-bar" class="progress-bar progress-bar-animated"></div>
+                            <div id="model-progress-text" class="progress-text">Loading...</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -271,6 +295,43 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Create Project Modal -->
+    <div id="project-modal" class="modal" style="display:none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content" style="width:380px;">
+            <div class="modal-header">
+                <h2>New Project</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Project Name</label>
+                    <input type="text" id="project-name-input" class="input" placeholder="My Project">
+                </div>
+                <div class="form-group">
+                    <label>Color</label>
+                    <div id="project-color-swatches" class="color-swatches">
+                        <span class="color-swatch selected" data-color="#6c8cff" style="background:#6c8cff;"></span>
+                        <span class="color-swatch" data-color="#4ccc6a" style="background:#4ccc6a;"></span>
+                        <span class="color-swatch" data-color="#ff5252" style="background:#ff5252;"></span>
+                        <span class="color-swatch" data-color="#ffb74d" style="background:#ffb74d;"></span>
+                        <span class="color-swatch" data-color="#c792ea" style="background:#c792ea;"></span>
+                        <span class="color-swatch" data-color="#89ddff" style="background:#89ddff;"></span>
+                        <span class="color-swatch" data-color="#f48fb1" style="background:#f48fb1;"></span>
+                        <span class="color-swatch" data-color="#c3e88d" style="background:#c3e88d;"></span>
+                    </div>
+                </div>
+                <button id="btn-create-project" class="btn btn-accent btn-block">Create Project</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Context Menu -->
+    <div id="session-context-menu" class="context-menu" style="display:none;">
+        <div class="context-menu-title">Move to project</div>
+        <div id="context-menu-projects" class="context-menu-items"></div>
     </div>
 
     <!-- Toast container -->

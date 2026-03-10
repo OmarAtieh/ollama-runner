@@ -127,8 +127,10 @@ export class API {
         return this._get('/api/sessions/');
     }
 
-    async createSession(title, modelId) {
-        return this._post('/api/sessions/', { title, model_id: modelId || null });
+    async createSession(title, modelId, projectId) {
+        const body = { title, model_id: modelId || null };
+        if (projectId) body.project_id = projectId;
+        return this._post('/api/sessions/', body);
     }
 
     async deleteSession(id) {
@@ -145,6 +147,24 @@ export class API {
 
     async getSessionTokens(sessionId) {
         return this._get(`/api/sessions/${sessionId}/tokens`);
+    }
+
+    // ── Projects ──────────────────────────────────────────────────
+
+    async getProjects() {
+        return this._get('/api/projects/');
+    }
+
+    async createProject(data) {
+        return this._post('/api/projects/', data);
+    }
+
+    async updateProject(id, data) {
+        return this._put(`/api/projects/${id}`, data);
+    }
+
+    async deleteProject(id) {
+        return this._delete(`/api/projects/${id}`);
     }
 
     // ── Config ────────────────────────────────────────────────────
