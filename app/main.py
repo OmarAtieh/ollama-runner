@@ -1,17 +1,19 @@
+import mimetypes
+# Fix MIME types FIRST — must happen before StaticFiles is instantiated.
+# Windows Python defaults .js to text/plain, which blocks ES module loading.
+mimetypes.init()
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
+
 import asyncio
 import logging
-import mimetypes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
-
-# Fix MIME types on Windows (Python may not register .js/.mjs correctly)
-mimetypes.add_type("application/javascript", ".js")
-mimetypes.add_type("application/javascript", ".mjs")
-mimetypes.add_type("text/css", ".css")
 from app.config import ensure_dirs, load_config
 from app.routers.system import router as system_router
 from app.routers.models import router as models_router
