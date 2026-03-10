@@ -91,15 +91,32 @@ export class ModelManager {
         const btn = document.getElementById('btn-download-binary');
         const prog = document.getElementById('binary-progress');
         const bar = document.getElementById('binary-progress-bar');
+        const statusText = document.getElementById('binary-status-text');
         btn.disabled = true;
         prog.style.display = 'block';
-        bar.style.width = '50%';
+        bar.style.width = '0%';
 
         try {
             await this.api.downloadBinary();
-            bar.style.width = '100%';
-            this.state.showToast('llama-server downloaded successfully', 'success');
-            this.binarySection.style.display = 'none';
+            let done = false;
+            while (!done) {
+                await this._sleep(1000);
+                const status = await this.api.getBinaryStatus();
+                const pct = Math.round((status.progress || 0) * 100);
+                bar.style.width = pct + '%';
+                statusText.textContent = `${status.status}: ${pct}%`;
+                if (status.status === 'ready' || status.available) {
+                    done = true;
+                    bar.style.width = '100%';
+                    statusText.textContent = 'Download complete';
+                    this.state.showToast('llama-server downloaded successfully', 'success');
+                    this.binarySection.style.display = 'none';
+                } else if (status.status === 'error') {
+                    done = true;
+                    this.state.showToast('Download failed', 'error');
+                    statusText.textContent = 'Download failed';
+                }
+            }
         } catch (err) {
             this.state.showToast('Download failed: ' + err.message, 'error');
         } finally {
