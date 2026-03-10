@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OllamaRunner</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h1 class="logo">OllamaRunner</h1>
+                <button id="btn-new-chat" class="btn btn-primary btn-block">+ New Chat</button>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-label">Sessions</div>
+                <div id="session-list" class="session-list"></div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-label">Model</div>
+                <div id="model-info" class="model-info">
+                    <div id="current-model-name" class="model-name">No model loaded</div>
+                    <button id="btn-model-picker" class="btn btn-secondary btn-block">Select Model</button>
+                    <div class="model-actions">
+                        <button id="btn-load-model" class="btn btn-accent btn-sm" disabled>Load</button>
+                        <button id="btn-unload-model" class="btn btn-danger btn-sm" disabled>Unload</button>
+                    </div>
+                    <div id="model-progress-container" class="progress-container" style="display:none;">
+                        <div id="model-progress-bar" class="progress-bar progress-bar-animated"></div>
+                        <div id="model-progress-text" class="progress-text">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="section-label">Resources</div>
+                <div id="resource-monitor" class="resource-monitor">
+                    <div class="resource-row">
+                        <span class="resource-label">CPU</span>
+                        <div class="resource-bar-bg"><div id="cpu-bar" class="resource-bar" style="width:0%"></div></div>
+                        <span id="cpu-text" class="resource-value">--</span>
+                    </div>
+                    <div class="resource-row">
+                        <span class="resource-label">GPU</span>
+                        <div class="resource-bar-bg"><div id="gpu-bar" class="resource-bar" style="width:0%"></div></div>
+                        <span id="gpu-text" class="resource-value">--</span>
+                    </div>
+                    <div class="resource-row">
+                        <span class="resource-label">VRAM</span>
+                        <div class="resource-bar-bg"><div id="vram-bar" class="resource-bar" style="width:0%"></div></div>
+                        <span id="vram-text" class="resource-value">--</span>
+                    </div>
+                    <div class="resource-row">
+                        <span class="resource-label">RAM</span>
+                        <div class="resource-bar-bg"><div id="ram-bar" class="resource-bar" style="width:0%"></div></div>
+                        <span id="ram-text" class="resource-value">--</span>
+                    </div>
+                    <div id="gpu-temp" class="resource-temp" style="display:none;">Temp: --</div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button id="btn-settings" class="btn btn-secondary btn-block">Settings</button>
+            </div>
+        </aside>
+
+        <!-- Mobile sidebar toggle -->
+        <button id="sidebar-toggle" class="sidebar-toggle">|||</button>
+
+        <!-- Main Chat Area -->
+        <main id="chat-area">
+            <div id="chat-header" class="chat-header">
+                <span id="chat-title">Select or create a chat</span>
+            </div>
+            <div id="messages" class="messages"></div>
+            <div id="typing-indicator" class="typing-indicator" style="display:none;">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
+            <div class="chat-input-area">
+                <div class="input-row">
+                    <textarea id="chat-input" placeholder="Type a message... (Enter to send, Shift+Enter for newline)" rows="1" disabled></textarea>
+                    <button id="btn-send" class="btn btn-accent" disabled>Send</button>
+                </div>
+                <div class="input-info">
+                    <span id="total-tokens">Total: 0 tokens</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Model Picker Modal -->
+    <div id="model-modal" class="modal" style="display:none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>Model Manager</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Binary status -->
+                <div id="binary-section" style="display:none;">
+                    <div class="section-label">llama-server Binary</div>
+                    <div id="binary-status-text"></div>
+                    <button id="btn-download-binary" class="btn btn-accent">Download llama-server</button>
+                    <div id="binary-progress" class="progress-container" style="display:none;">
+                        <div id="binary-progress-bar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <!-- Scanned models -->
+                <div class="section-label">Available GGUF Files</div>
+                <button id="btn-scan-models" class="btn btn-secondary btn-sm">Scan Directory</button>
+                <div id="scanned-models-list" class="model-list"></div>
+
+                <!-- Registry -->
+                <div class="section-label" style="margin-top:16px;">Registered Models</div>
+                <div id="registry-list" class="model-list"></div>
+
+                <!-- Model config panel -->
+                <div id="model-config-panel" class="model-config" style="display:none;">
+                    <h3 id="config-model-name"></h3>
+                    <div class="slider-group">
+                        <label>GPU Layers: <span id="gpu-layers-value">-1</span></label>
+                        <input type="range" id="slider-gpu-layers" min="-1" max="100" value="-1">
+                    </div>
+                    <div class="slider-group">
+                        <label>Context Length: <span id="ctx-length-value">4096</span></label>
+                        <input type="range" id="slider-ctx-length" min="512" max="65536" step="512" value="4096">
+                    </div>
+                    <div class="slider-group">
+                        <label>Temperature: <span id="temp-value">0.7</span></label>
+                        <input type="range" id="slider-temp" min="0" max="2" step="0.05" value="0.7">
+                    </div>
+                    <div class="slider-group">
+                        <label>Top P: <span id="topp-value">0.9</span></label>
+                        <input type="range" id="slider-topp" min="0" max="1" step="0.05" value="0.9">
+                    </div>
+                    <div id="resource-estimate" class="resource-estimate"></div>
+                    <div class="model-config-actions">
+                        <button id="btn-save-model-config" class="btn btn-accent">Save Config</button>
+                        <button id="btn-load-from-config" class="btn btn-primary">Load This Model</button>
+                        <button id="btn-delete-model" class="btn btn-danger">Remove</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display:none;">
+        <div class="modal-overlay"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tabs">
+                    <button class="tab active" data-tab="general">General</button>
+                    <button class="tab" data-tab="system-prompt">System Prompt</button>
+                    <button class="tab" data-tab="identity">Identity</button>
+                    <button class="tab" data-tab="user">User</button>
+                    <button class="tab" data-tab="memory">Memory</button>
+                </div>
+
+                <div id="tab-general" class="tab-content active">
+                    <div class="form-group">
+                        <label>Models Directory</label>
+                        <input type="text" id="setting-models-dir" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label>Default Model</label>
+                        <select id="setting-default-model" class="input"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="setting-load-on-start">
+                            Load default model on start
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label>VRAM Limit: <span id="vram-limit-value">90%</span></label>
+                        <input type="range" id="setting-vram-limit" min="50" max="100" value="90">
+                    </div>
+                    <div class="form-group">
+                        <label>RAM Limit: <span id="ram-limit-value">80%</span></label>
+                        <input type="range" id="setting-ram-limit" min="50" max="100" value="80">
+                    </div>
+                    <button id="btn-save-settings" class="btn btn-accent">Save Settings</button>
+                    <span id="settings-save-indicator" class="save-indicator"></span>
+                </div>
+
+                <div id="tab-system-prompt" class="tab-content">
+                    <textarea id="prompt-system-prompt" class="prompt-editor" placeholder="Enter system prompt..."></textarea>
+                    <button class="btn btn-accent btn-save-prompt" data-file="system-prompt.md">Save</button>
+                    <span class="save-indicator prompt-save-indicator"></span>
+                </div>
+
+                <div id="tab-identity" class="tab-content">
+                    <textarea id="prompt-identity" class="prompt-editor" placeholder="Enter identity prompt..."></textarea>
+                    <button class="btn btn-accent btn-save-prompt" data-file="identity.md">Save</button>
+                    <span class="save-indicator prompt-save-indicator"></span>
+                </div>
+
+                <div id="tab-user" class="tab-content">
+                    <textarea id="prompt-user" class="prompt-editor" placeholder="Enter user context..."></textarea>
+                    <button class="btn btn-accent btn-save-prompt" data-file="user.md">Save</button>
+                    <span class="save-indicator prompt-save-indicator"></span>
+                </div>
+
+                <div id="tab-memory" class="tab-content">
+                    <textarea id="prompt-memory" class="prompt-editor" placeholder="Enter memory notes..."></textarea>
+                    <button class="btn btn-accent btn-save-prompt" data-file="memory.md">Save</button>
+                    <span class="save-indicator prompt-save-indicator"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
