@@ -1,11 +1,17 @@
 import asyncio
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pathlib import Path
+
+# Fix MIME types on Windows (Python may not register .js/.mjs correctly)
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
 from app.config import ensure_dirs, load_config
 from app.routers.system import router as system_router
 from app.routers.models import router as models_router
@@ -81,3 +87,9 @@ async def root():
     if index.exists():
         return FileResponse(str(index))
     return {"message": "OllamaRunner - UI not yet built"}
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    # Return empty response to suppress 404
+    return Response(content=b"", media_type="image/x-icon")
