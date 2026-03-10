@@ -4,11 +4,13 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 from app.config import ensure_dirs
 from app.routers.system import router as system_router
+from app.routers.models import router as models_router
 
 ensure_dirs()
 
 app = FastAPI(title="OllamaRunner", version="0.1.0")
 app.include_router(system_router)
+app.include_router(models_router)
 
 static_dir = Path(__file__).parent.parent / "static"
 static_dir.mkdir(exist_ok=True)
