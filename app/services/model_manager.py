@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import platform
+import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -16,7 +17,7 @@ import psutil
 
 from app.config import APP_DIR, MODELS_DIR, load_config
 from app.services.binary_manager import BinaryManager
-from app.services.model_scanner import read_gguf_metadata
+from app.services.model_scanner import infer_capabilities, read_gguf_metadata
 from app.services.system_monitor import SystemMonitor
 
 log = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class ModelConfig:
     temperature: float = 0.7
     top_p: float = 0.9
     repeat_penalty: float = 1.1
+    notes: str = ""
+    capabilities: list[str] = field(default_factory=list)
 
 
 class ModelManager:
@@ -45,7 +48,7 @@ class ModelManager:
         self._app_dir = app_dir or APP_DIR
         self._registry_path = self._app_dir / "models.json"
         self._server_port = 8081
-        self._process: asyncio.subprocess.Process | None = None
+        self._process: subprocess.Popen | None = None
         self._current_model_id: str | None = None
         self._loading = False
         self._load_progress: float = 0.0
@@ -65,18 +68,40 @@ class ModelManager:
             return []
         try:
             data = json.loads(self._registry_path.read_text(encoding="utf-8"))
-            return [ModelConfig(**item) for item in data]
-        except (json.JSONDecodeError, TypeError, OSError) as exc:
+            # Filter to only known fields to handle schema changes gracefully
+            known_fields = {f.name for f in ModelConfig.__dataclass_fields__.values()}
+            results = []
+            dirty = False
+            for item in data:
+                filtered = {k: v for k, v in item.items() if k in known_fields}
+                try:
+                    model = ModelConfig(**filtered)
+                    # Backfill capabilities if empty
+                    if not model.capabilities:
+                        name_for_caps = f"{model.name} {Path(model.path).name} {Path(model.path).parent.name}"
+                        model.capabilities = infer_capabilities(name_for_caps)
+                        if model.capabilities:
+                            dirty = True
+                    results.append(model)
+                except (TypeError, ValueError) as exc:
+                    log.warning("Skipping invalid registry entry %s: %s", item.get("id", "?"), exc)
+            # Persist backfilled capabilities
+            if dirty:
+                self.save_registry(results)
+            return results
+        except (json.JSONDecodeError, OSError) as exc:
             log.error("Failed to load registry: %s", exc)
             return []
 
     def save_registry(self, models: list[ModelConfig]) -> None:
-        """Save models to the JSON registry file."""
+        """Save models to the JSON registry file atomically."""
         self._registry_path.parent.mkdir(parents=True, exist_ok=True)
         data = [asdict(m) for m in models]
-        self._registry_path.write_text(
-            json.dumps(data, indent=2), encoding="utf-8"
-        )
+        content = json.dumps(data, indent=2)
+        # Write to temp file then rename for atomicity
+        tmp_path = self._registry_path.with_suffix(".tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(self._registry_path)
 
     def _generate_id(self, path: str) -> str:
         """Generate a stable ID from the model file path."""
@@ -267,7 +292,7 @@ class ModelManager:
                 "-ngl", str(gpu_layers),
                 "--host", "127.0.0.1",
                 "--port", str(self._server_port),
-                "-fa",
+                "-fa", "on",
                 "--mlock",
                 "-t", str(threads),
                 "--batch-size", "512",
@@ -280,22 +305,33 @@ class ModelManager:
 
             log.info("Starting llama-server: %s", " ".join(cmd))
 
-            self._process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+            self._process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
             )
 
             # Poll health endpoint for readiness (2 min timeout)
             health_url = f"http://127.0.0.1:{self._server_port}/health"
-            deadline = asyncio.get_event_loop().time() + 120
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 120
 
-            while asyncio.get_event_loop().time() < deadline:
+            while loop.time() < deadline:
                 await asyncio.sleep(1)
 
                 # Check if process died
-                if self._process.returncode is not None:
-                    self._last_error = f"llama-server exited with code {self._process.returncode}"
+                ret = self._process.poll()
+                if ret is not None:
+                    stderr_out = ""
+                    try:
+                        raw = self._process.stderr.read()
+                        stderr_out = raw.decode("utf-8", errors="replace")[-500:]
+                    except Exception:
+                        pass
+                    self._last_error = f"llama-server exited with code {ret}"
+                    if stderr_out:
+                        self._last_error += f": {stderr_out.strip()}"
                     log.error(self._last_error)
                     self._loading = False
                     self._process = None
@@ -304,8 +340,8 @@ class ModelManager:
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                            data = await resp.json()
                             if resp.status == 200:
-                                data = await resp.json()
                                 status = data.get("status", "")
                                 if status == "ok":
                                     self._current_model_id = model_id
@@ -315,6 +351,9 @@ class ModelManager:
                                     return True
                                 elif "progress" in data:
                                     self._load_progress = data["progress"]
+                            elif resp.status == 503:
+                                # Server is up but still loading
+                                self._load_progress = 0.5  # indeterminate
                 except Exception:
                     pass
 
@@ -326,8 +365,9 @@ class ModelManager:
             return False
 
         except Exception as exc:
-            self._last_error = str(exc)
-            log.error("Failed to load model: %s", exc)
+            import traceback
+            self._last_error = str(exc) or repr(exc)
+            log.error("Failed to load model: %s\n%s", exc, traceback.format_exc())
             self._loading = False
             return False
 
@@ -339,11 +379,11 @@ class ModelManager:
         try:
             self._process.terminate()
             try:
-                await asyncio.wait_for(self._process.wait(), timeout=10)
-            except asyncio.TimeoutError:
+                self._process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
                 log.warning("llama-server did not exit gracefully, killing")
                 self._process.kill()
-                await self._process.wait()
+                self._process.wait(timeout=5)
         except ProcessLookupError:
             pass
         except Exception as exc:

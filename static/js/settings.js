@@ -25,13 +25,9 @@ export class SettingsUI {
             tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
         });
 
-        // Slider value displays
-        document.getElementById('setting-vram-limit').addEventListener('input', (e) => {
-            document.getElementById('vram-limit-value').textContent = e.target.value + '%';
-        });
-        document.getElementById('setting-ram-limit').addEventListener('input', (e) => {
-            document.getElementById('ram-limit-value').textContent = e.target.value + '%';
-        });
+        // Slider + input sync for VRAM limit
+        this._syncSliderInput('setting-vram-limit', 'input-vram-limit', 'vram-limit-value', '%');
+        this._syncSliderInput('setting-ram-limit', 'input-ram-limit', 'ram-limit-value', '%');
 
         // Save settings
         document.getElementById('btn-save-settings').addEventListener('click', () => this._saveSettings());
@@ -42,6 +38,40 @@ export class SettingsUI {
                 const filename = btn.dataset.file;
                 this._savePrompt(filename, btn);
             });
+        });
+    }
+
+    _syncSliderInput(sliderId, inputId, valueId, suffix = '') {
+        const slider = document.getElementById(sliderId);
+        const input = document.getElementById(inputId);
+        const valueEl = document.getElementById(valueId);
+
+        slider.addEventListener('input', () => {
+            const v = parseInt(slider.value);
+            input.value = v;
+            valueEl.textContent = v + suffix;
+        });
+
+        input.addEventListener('input', () => {
+            let v = parseInt(input.value);
+            const min = parseInt(slider.min);
+            const max = parseInt(slider.max);
+            if (v < min) v = min;
+            if (v > max) v = max;
+            slider.value = v;
+            valueEl.textContent = v + suffix;
+        });
+
+        input.addEventListener('blur', () => {
+            let v = parseInt(input.value);
+            const min = parseInt(slider.min);
+            const max = parseInt(slider.max);
+            if (isNaN(v)) v = parseInt(slider.value);
+            if (v < min) v = min;
+            if (v > max) v = max;
+            input.value = v;
+            slider.value = v;
+            valueEl.textContent = v + suffix;
         });
     }
 
@@ -56,17 +86,14 @@ export class SettingsUI {
     }
 
     _switchTab(tabName) {
-        // Update tab buttons
         this.modal.querySelectorAll('.tab').forEach(t => {
             t.classList.toggle('active', t.dataset.tab === tabName);
         });
 
-        // Update tab content
         this.modal.querySelectorAll('.tab-content').forEach(tc => {
             tc.classList.toggle('active', tc.id === `tab-${tabName}`);
         });
 
-        // Load prompt content when switching to prompt tabs
         const promptMap = {
             'system-prompt': 'system-prompt.md',
             'identity': 'identity.md',
@@ -84,12 +111,14 @@ export class SettingsUI {
             document.getElementById('setting-models-dir').value = config.models_directory || '';
             document.getElementById('setting-load-on-start').checked = !!config.load_model_on_start;
 
-            const vramLimit = config.vram_limit_percent || 90;
+            const vramLimit = config.vram_limit_percent || 95;
             document.getElementById('setting-vram-limit').value = vramLimit;
+            document.getElementById('input-vram-limit').value = vramLimit;
             document.getElementById('vram-limit-value').textContent = vramLimit + '%';
 
-            const ramLimit = config.ram_limit_percent || 80;
+            const ramLimit = config.ram_limit_percent || 85;
             document.getElementById('setting-ram-limit').value = ramLimit;
+            document.getElementById('input-ram-limit').value = ramLimit;
             document.getElementById('ram-limit-value').textContent = ramLimit + '%';
 
             // Populate default model dropdown

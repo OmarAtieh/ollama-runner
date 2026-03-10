@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import load_config
 from app.services.model_scanner import scan_models_directory
@@ -26,6 +26,8 @@ class AddModelRequest(BaseModel):
     temperature: float = 0.7
     top_p: float = 0.9
     repeat_penalty: float = 1.1
+    notes: str = ""
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class UpdateModelRequest(BaseModel):
@@ -37,6 +39,8 @@ class UpdateModelRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     repeat_penalty: Optional[float] = None
+    notes: Optional[str] = None
+    capabilities: Optional[list[str]] = None
 
 
 class LoadModelRequest(BaseModel):
@@ -94,16 +98,25 @@ async def remove_from_registry(model_id: str):
 
 @router.post("/load/{model_id}")
 async def load_model(model_id: str, req: LoadModelRequest = LoadModelRequest()):
-    """Load a model (start llama-server)."""
+    """Load a model (start llama-server). Non-blocking — poll GET /status."""
+    import asyncio
+
     mm = ModelManager.instance()
     model = mm.get_model(model_id)
     if model is None:
         raise HTTPException(status_code=404, detail="Model not found in registry")
-    success = await mm.load_model(model_id, context_length=req.context_length)
+
+    # If already loading, just return status
     status = mm.get_status()
-    if not success:
-        status["error"] = status.get("error") or "Failed to load model"
-    return status
+    if status["loading"]:
+        return status
+
+    # Launch load in background so the endpoint returns immediately
+    asyncio.create_task(mm.load_model(model_id, context_length=req.context_length))
+
+    # Give it a moment to start
+    await asyncio.sleep(0.1)
+    return mm.get_status()
 
 
 @router.post("/unload")

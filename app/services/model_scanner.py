@@ -74,11 +74,51 @@ _QUANT_PATTERNS = [
 ]
 
 
+# Capability detection patterns: (capability_name, patterns_to_match)
+_CAPABILITY_PATTERNS = [
+    ("thinking", ["think", "reasoning", "cot", "-r1-", "-r1.", "r1-"]),
+    ("vision", ["vision", "-vl-", "-vl.", "4.6v", "multimodal", "llava",
+                "minicpm-v", "cogvlm", "internvl", "pixtral"]),
+    ("code", ["code", "coder", "codestral", "starcoder", "codellama",
+              "deepseek-v2.5", "qwen2.5-coder", "qwen3.5-coder"]),
+    ("math", ["math", "mathstral", "deepseek-math"]),
+    ("chat", ["chat", "instruct", "-it-", "-it."]),
+    ("tools", ["tool-use", "function", "hermes", "functionary"]),
+    ("creative", ["creative", "writing", "story"]),
+    ("multilingual", ["multilingual", "aya", "qwen"]),
+    ("embedding", ["embed", "e5-", "bge-"]),
+    ("roleplay", ["roleplay", "rp-", "mythomax", "lumimaid"]),
+    ("moe", ["-moe-", "-a2b", "-a3b", "-a4b", "mixture"]),
+]
+
+
+def infer_capabilities(name: str, metadata_tags: list[str] | None = None) -> list[str]:
+    """Infer model capabilities from name, path, and metadata tags."""
+    lower = name.lower()
+    caps = []
+    for cap, patterns in _CAPABILITY_PATTERNS:
+        for pat in patterns:
+            if pat in lower:
+                caps.append(cap)
+                break
+    # Also check metadata tags if available (e.g. from general.tags)
+    if metadata_tags:
+        tag_str = " ".join(t.lower() for t in metadata_tags)
+        for cap, patterns in _CAPABILITY_PATTERNS:
+            if cap not in caps:
+                for pat in patterns:
+                    if pat in tag_str:
+                        caps.append(cap)
+                        break
+    return caps
+
+
 @dataclass
 class GGUFMetadata:
     file_path: str
     file_size_mb: float
     model_name: str | None
+    display_name: str  # parent_folder/filename for UI clarity
     architecture: str | None
     parameter_count: int | None
     quantization: str
@@ -86,6 +126,7 @@ class GGUFMetadata:
     embedding_length: int | None
     num_layers: int | None
     vocab_size: int | None
+    capabilities: list[str] | None = None
 
 
 def infer_quant_from_filename(filename: str) -> str:
@@ -203,10 +244,21 @@ def read_gguf_metadata(file_path: Path) -> GGUFMetadata | None:
             # Very rough estimate: 12 * hidden^2 * layers (transformer formula)
             parameter_count = int(12 * embedding_length * embedding_length * block_count)
 
+        # Build display name: parent_folder/filename
+        display_name = f"{file_path.parent.name}/{file_path.name}"
+
+        # Infer capabilities from name, path, and metadata tags
+        name_for_caps = f"{model_name or ''} {file_path.name} {file_path.parent.name}"
+        metadata_tags = metadata.get("general.tags")
+        if metadata_tags and not isinstance(metadata_tags, list):
+            metadata_tags = None
+        capabilities = infer_capabilities(name_for_caps, metadata_tags)
+
         return GGUFMetadata(
             file_path=str(file_path),
             file_size_mb=round(file_size_mb, 1),
             model_name=model_name,
+            display_name=display_name,
             architecture=architecture,
             parameter_count=parameter_count,
             quantization=quantization,
@@ -214,6 +266,7 @@ def read_gguf_metadata(file_path: Path) -> GGUFMetadata | None:
             embedding_length=int(embedding_length) if embedding_length else None,
             num_layers=int(block_count) if block_count else None,
             vocab_size=int(vocab_size) if vocab_size else None,
+            capabilities=capabilities or None,
         )
 
     except Exception as exc:

@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OllamaRunner</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -15,7 +18,7 @@
         <aside id="sidebar">
             <div class="sidebar-header">
                 <h1 class="logo">OllamaRunner</h1>
-                <button id="btn-new-chat" class="btn btn-primary btn-block">+ New Chat</button>
+                <button id="btn-new-chat" class="btn btn-accent btn-block">+ New Chat</button>
             </div>
 
             <div class="sidebar-section">
@@ -26,7 +29,12 @@
             <div class="sidebar-section">
                 <div class="section-label">Model</div>
                 <div id="model-info" class="model-info">
-                    <div id="current-model-name" class="model-name">No model loaded</div>
+                    <div class="model-status-row">
+                        <span id="model-status-dot" class="status-dot offline"></span>
+                        <div id="current-model-name" class="model-name">No model loaded</div>
+                    </div>
+                    <div id="sidebar-model-caps" class="model-list-item-caps" style="margin-top:2px;"></div>
+                    <div id="model-status-text" class="model-status-text"></div>
                     <button id="btn-model-picker" class="btn btn-secondary btn-block">Select Model</button>
                     <div class="model-actions">
                         <button id="btn-load-model" class="btn btn-accent btn-sm" disabled>Load</button>
@@ -107,10 +115,10 @@
                 <!-- Binary status -->
                 <div id="binary-section" style="display:none;">
                     <div class="section-label">llama-server Binary</div>
-                    <div id="binary-status-text"></div>
+                    <div id="binary-status-text" style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;"></div>
                     <button id="btn-download-binary" class="btn btn-accent">Download llama-server</button>
                     <div id="binary-progress" class="progress-container" style="display:none;">
-                        <div id="binary-progress-bar" class="progress-bar"></div>
+                        <div id="binary-progress-bar" class="progress-bar progress-bar-animated"></div>
                     </div>
                 </div>
 
@@ -120,29 +128,57 @@
                 <div id="scanned-models-list" class="model-list"></div>
 
                 <!-- Registry -->
-                <div class="section-label" style="margin-top:16px;">Registered Models</div>
+                <div class="section-label" style="margin-top:20px;">Registered Models</div>
                 <div id="registry-list" class="model-list"></div>
 
                 <!-- Model config panel -->
                 <div id="model-config-panel" class="model-config" style="display:none;">
                     <h3 id="config-model-name"></h3>
+
                     <div class="slider-group">
-                        <label>GPU Layers: <span id="gpu-layers-value">-1</span></label>
-                        <input type="range" id="slider-gpu-layers" min="-1" max="100" value="-1">
+                        <label>GPU Layers <span id="gpu-layers-value">-1</span></label>
+                        <div class="slider-input-row">
+                            <input type="range" id="slider-gpu-layers" min="-1" max="100" value="-1">
+                            <input type="number" id="input-gpu-layers" min="-1" max="100" value="-1">
+                        </div>
                     </div>
+
                     <div class="slider-group">
-                        <label>Context Length: <span id="ctx-length-value">4096</span></label>
-                        <input type="range" id="slider-ctx-length" min="512" max="65536" step="512" value="4096">
+                        <label>Context Length <span id="ctx-length-value">4096</span></label>
+                        <div class="slider-input-row">
+                            <input type="range" id="slider-ctx-length" min="512" max="65536" step="512" value="4096">
+                            <input type="number" id="input-ctx-length" min="512" max="65536" step="512" value="4096">
+                        </div>
                     </div>
+
                     <div class="slider-group">
-                        <label>Temperature: <span id="temp-value">0.7</span></label>
-                        <input type="range" id="slider-temp" min="0" max="2" step="0.05" value="0.7">
+                        <label>Temperature <span id="temp-value">0.7</span></label>
+                        <div class="slider-input-row">
+                            <input type="range" id="slider-temp" min="0" max="2" step="0.05" value="0.7">
+                            <input type="number" id="input-temp" min="0" max="2" step="0.05" value="0.7">
+                        </div>
                     </div>
+
                     <div class="slider-group">
-                        <label>Top P: <span id="topp-value">0.9</span></label>
-                        <input type="range" id="slider-topp" min="0" max="1" step="0.05" value="0.9">
+                        <label>Top P <span id="topp-value">0.9</span></label>
+                        <div class="slider-input-row">
+                            <input type="range" id="slider-topp" min="0" max="1" step="0.05" value="0.9">
+                            <input type="number" id="input-topp" min="0" max="1" step="0.05" value="0.9">
+                        </div>
                     </div>
-                    <div id="resource-estimate" class="resource-estimate"></div>
+
+                    <div class="slider-group">
+                        <label>Capabilities</label>
+                        <input type="text" id="model-capabilities" class="model-notes-input" placeholder="e.g. thinking, vision, code (comma-separated)">
+                    </div>
+
+                    <div class="slider-group">
+                        <label>Notes</label>
+                        <textarea id="model-notes" class="model-notes-input" placeholder="Add a short note about this model..." rows="2"></textarea>
+                    </div>
+
+                    <div id="resource-estimate" class="resource-estimate" style="display:none;"></div>
+
                     <div class="model-config-actions">
                         <button id="btn-save-model-config" class="btn btn-accent">Save Config</button>
                         <button id="btn-load-from-config" class="btn btn-primary">Load This Model</button>
@@ -173,7 +209,7 @@
                 <div id="tab-general" class="tab-content active">
                     <div class="form-group">
                         <label>Models Directory</label>
-                        <input type="text" id="setting-models-dir" class="input">
+                        <input type="text" id="setting-models-dir" class="input" placeholder="Path to GGUF models folder">
                     </div>
                     <div class="form-group">
                         <label>Default Model</label>
@@ -185,38 +221,51 @@
                             Load default model on start
                         </label>
                     </div>
-                    <div class="form-group">
-                        <label>VRAM Limit: <span id="vram-limit-value">90%</span></label>
-                        <input type="range" id="setting-vram-limit" min="50" max="100" value="90">
+
+                    <div class="settings-slider-group">
+                        <label>VRAM Limit <span id="vram-limit-value">95%</span></label>
+                        <div class="settings-slider-row">
+                            <input type="range" id="setting-vram-limit" min="50" max="100" value="95">
+                            <input type="number" id="input-vram-limit" min="50" max="100" value="95">
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>RAM Limit: <span id="ram-limit-value">80%</span></label>
-                        <input type="range" id="setting-ram-limit" min="50" max="100" value="80">
+
+                    <div class="settings-slider-group">
+                        <label>RAM Limit <span id="ram-limit-value">85%</span></label>
+                        <div class="settings-slider-row">
+                            <input type="range" id="setting-ram-limit" min="50" max="100" value="85">
+                            <input type="number" id="input-ram-limit" min="50" max="100" value="85">
+                        </div>
                     </div>
+
                     <button id="btn-save-settings" class="btn btn-accent">Save Settings</button>
                     <span id="settings-save-indicator" class="save-indicator"></span>
                 </div>
 
                 <div id="tab-system-prompt" class="tab-content">
-                    <textarea id="prompt-system-prompt" class="prompt-editor" placeholder="Enter system prompt..."></textarea>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Define how the model should behave. This is prepended to every conversation.</p>
+                    <textarea id="prompt-system-prompt" class="prompt-editor" placeholder="You are a helpful assistant..."></textarea>
                     <button class="btn btn-accent btn-save-prompt" data-file="system-prompt.md">Save</button>
                     <span class="save-indicator prompt-save-indicator"></span>
                 </div>
 
                 <div id="tab-identity" class="tab-content">
-                    <textarea id="prompt-identity" class="prompt-editor" placeholder="Enter identity prompt..."></textarea>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Give the model a name and personality.</p>
+                    <textarea id="prompt-identity" class="prompt-editor" placeholder="Your name is..."></textarea>
                     <button class="btn btn-accent btn-save-prompt" data-file="identity.md">Save</button>
                     <span class="save-indicator prompt-save-indicator"></span>
                 </div>
 
                 <div id="tab-user" class="tab-content">
-                    <textarea id="prompt-user" class="prompt-editor" placeholder="Enter user context..."></textarea>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Tell the model about yourself so it can personalize responses.</p>
+                    <textarea id="prompt-user" class="prompt-editor" placeholder="My name is... I work on..."></textarea>
                     <button class="btn btn-accent btn-save-prompt" data-file="user.md">Save</button>
                     <span class="save-indicator prompt-save-indicator"></span>
                 </div>
 
                 <div id="tab-memory" class="tab-content">
-                    <textarea id="prompt-memory" class="prompt-editor" placeholder="Enter memory notes..."></textarea>
+                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Persistent notes the model should remember across sessions.</p>
+                    <textarea id="prompt-memory" class="prompt-editor" placeholder="Remember that..."></textarea>
                     <button class="btn btn-accent btn-save-prompt" data-file="memory.md">Save</button>
                     <span class="save-indicator prompt-save-indicator"></span>
                 </div>
