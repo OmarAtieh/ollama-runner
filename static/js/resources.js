@@ -60,13 +60,13 @@ export class ResourceMonitor {
         this.cpuText.textContent = cpuPct.toFixed(0) + '%';
 
         // GPU utilization
-        const gpuPct = r.gpu_utilization || 0;
+        const gpuPct = r.gpu?.gpu_utilization || 0;
         this._setBar(this.gpuBar, gpuPct);
         this.gpuText.textContent = gpuPct.toFixed(0) + '%';
 
         // VRAM
-        const vramUsed = r.gpu_vram_used_mb || 0;
-        const vramTotal = r.gpu_vram_total_mb || 0;
+        const vramUsed = r.gpu?.vram_used_mb || 0;
+        const vramTotal = r.gpu?.vram_total_mb || 0;
         const vramPct = vramTotal > 0 ? (vramUsed / vramTotal) * 100 : 0;
         this._setBar(this.vramBar, vramPct);
         this.vramText.textContent = vramTotal > 0
@@ -83,9 +83,9 @@ export class ResourceMonitor {
             : '--';
 
         // GPU temp
-        if (r.gpu_temperature != null && r.gpu_temperature > 0) {
+        if (r.gpu?.temperature != null && r.gpu.temperature > 0) {
             this.gpuTempEl.style.display = 'block';
-            this.gpuTempEl.textContent = `Temp: ${r.gpu_temperature}\u00B0C`;
+            this.gpuTempEl.textContent = `Temp: ${r.gpu.temperature}\u00B0C`;
         } else {
             this.gpuTempEl.style.display = 'none';
         }

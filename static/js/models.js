@@ -73,7 +73,7 @@ export class ModelManager {
     async _checkBinary() {
         try {
             const status = await this.api.getBinaryStatus();
-            if (!status.installed) {
+            if (!status.available) {
                 this.binarySection.style.display = 'block';
                 document.getElementById('binary-status-text').textContent =
                     'llama-server not found. Download required.';
@@ -119,11 +119,11 @@ export class ModelManager {
             for (const m of models) {
                 const item = document.createElement('div');
                 item.className = 'model-list-item';
-                const sizeMB = m.size_bytes ? (m.size_bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB' : '';
+                const sizeGB = m.file_size_mb ? (m.file_size_mb / 1024).toFixed(1) + ' GB' : '';
                 item.innerHTML = `
                     <div class="model-list-item-info">
-                        <div class="model-list-item-name">${this._escapeHtml(m.name || m.filename)}</div>
-                        <div class="model-list-item-meta">${sizeMB} ${m.quant_type || ''} ctx:${m.context_length || '?'}</div>
+                        <div class="model-list-item-name">${this._escapeHtml(m.model_name)}</div>
+                        <div class="model-list-item-meta">${sizeGB} ${m.quantization || ''} ctx:${m.context_length || '?'}</div>
                     </div>
                     <button class="btn btn-sm btn-accent">Add</button>
                 `;
@@ -142,8 +142,8 @@ export class ModelManager {
     async _addToRegistry(scanned) {
         try {
             await this.api.addModel({
-                name: scanned.name || scanned.filename,
-                path: scanned.path,
+                name: scanned.model_name,
+                path: scanned.file_path,
                 context_default: scanned.context_length || 4096,
                 context_max: scanned.context_length || 32768,
             });
@@ -224,8 +224,8 @@ export class ModelManager {
         try {
             const est = await this.api.estimateResources(this._selectedRegistryId, gpuLayers, ctxLength);
             let html = '';
-            if (est.estimated_vram_mb != null) html += `VRAM: ~${est.estimated_vram_mb} MB\n`;
-            if (est.estimated_ram_mb != null) html += `RAM: ~${est.estimated_ram_mb} MB\n`;
+            if (est.vram_needed_mb != null) html += `VRAM: ~${est.vram_needed_mb} MB\n`;
+            if (est.ram_needed_mb != null) html += `RAM: ~${est.ram_needed_mb} MB\n`;
             if (est.feasible != null) {
                 html += est.feasible ? 'Status: Feasible' : 'Status: May not fit!';
             }
@@ -296,9 +296,9 @@ export class ModelManager {
                 const status = await this.api.getModelStatus();
 
                 if (status.loading) {
-                    const pct = status.progress || 0;
+                    const pct = Math.round((status.load_progress || 0) * 100);
                     progressBar.style.width = pct + '%';
-                    progressText.textContent = status.status_text || `Loading... ${pct}%`;
+                    progressText.textContent = `Loading... ${pct}%`;
                 } else if (status.loaded) {
                     loaded = true;
                     progressBar.style.width = '100%';
@@ -355,7 +355,7 @@ export class ModelManager {
         const loadBtn = document.getElementById('btn-load-model');
 
         if (status.loaded) {
-            nameEl.textContent = status.model_name || 'Model loaded';
+            nameEl.textContent = status.current_model?.name || 'Model loaded';
             unloadBtn.disabled = false;
             loadBtn.disabled = false;
         } else {
