@@ -16,6 +16,8 @@ export class ChatUI {
 
         this._currentAssistantEl = null;
         this._currentTokens = '';
+        this._currentThinking = '';
+        this._thinkingEl = null;
         this._streaming = false;
         this._userScrolledUp = false;
 
@@ -113,7 +115,37 @@ export class ChatUI {
 
         const contentEl = document.createElement('div');
         contentEl.className = 'message-content';
-        contentEl.innerHTML = this._renderMarkdown(content);
+
+        // Parse saved thinking blocks from stored messages
+        if (role === 'assistant' && content && content.includes('<thinking>')) {
+            const thinkMatch = content.match(/<thinking>\n?([\s\S]*?)\n?<\/thinking>\n*(.*)$/s);
+            if (thinkMatch) {
+                const thinkText = thinkMatch[1];
+                const responseText = thinkMatch[2];
+                const thinkBlock = document.createElement('details');
+                thinkBlock.className = 'thinking-block';
+                const summary = document.createElement('summary');
+                summary.className = 'thinking-summary';
+                const wordCount = thinkText.split(/\s+/).length;
+                summary.textContent = `Thinking (${wordCount} words)`;
+                thinkBlock.appendChild(summary);
+                const thinkContent = document.createElement('div');
+                thinkContent.className = 'thinking-content';
+                thinkContent.innerHTML = this._renderMarkdown(thinkText);
+                thinkBlock.appendChild(thinkContent);
+                contentEl.appendChild(thinkBlock);
+                if (responseText.trim()) {
+                    const responseDiv = document.createElement('div');
+                    responseDiv.className = 'response-content';
+                    responseDiv.innerHTML = this._renderMarkdown(responseText);
+                    contentEl.appendChild(responseDiv);
+                }
+            } else {
+                contentEl.innerHTML = this._renderMarkdown(content);
+            }
+        } else {
+            contentEl.innerHTML = this._renderMarkdown(content);
+        }
         el.appendChild(contentEl);
 
         if (role === 'assistant' && tokenCount) {
@@ -177,8 +209,56 @@ export class ChatUI {
         switch (data.type) {
             case 'start':
                 this._currentTokens = '';
+                this._currentThinking = '';
+                this._thinkingEl = null;
                 this._currentAssistantEl = this._appendMessage('assistant', '');
                 this._showTyping(false);
+                break;
+
+            case 'thinking_start': {
+                // Create a collapsible thinking block inside the message
+                if (this._currentAssistantEl) {
+                    const contentEl = this._currentAssistantEl.querySelector('.message-content');
+                    if (contentEl) {
+                        const thinkBlock = document.createElement('details');
+                        thinkBlock.className = 'thinking-block';
+                        thinkBlock.open = true;
+                        const summary = document.createElement('summary');
+                        summary.className = 'thinking-summary';
+                        summary.textContent = 'Thinking...';
+                        thinkBlock.appendChild(summary);
+                        const thinkContent = document.createElement('div');
+                        thinkContent.className = 'thinking-content';
+                        thinkBlock.appendChild(thinkContent);
+                        contentEl.appendChild(thinkBlock);
+                        this._thinkingEl = thinkContent;
+                    }
+                }
+                break;
+            }
+
+            case 'thinking':
+                if (data.content && this._thinkingEl) {
+                    this._currentThinking += data.content;
+                    this._thinkingEl.innerHTML = this._renderMarkdown(this._currentThinking);
+                    this._scrollToBottom();
+                }
+                break;
+
+            case 'thinking_end':
+                if (this._thinkingEl) {
+                    // Final render of thinking
+                    this._thinkingEl.innerHTML = this._renderMarkdown(this._currentThinking);
+                    // Update summary with token count
+                    const details = this._thinkingEl.closest('.thinking-block');
+                    if (details) {
+                        const summary = details.querySelector('.thinking-summary');
+                        const wordCount = this._currentThinking.split(/\s+/).length;
+                        summary.textContent = `Thinking (${wordCount} words)`;
+                        details.open = false; // Collapse thinking when done
+                    }
+                }
+                this._thinkingEl = null;
                 break;
 
             case 'token':
@@ -186,7 +266,20 @@ export class ChatUI {
                     this._currentTokens += data.content;
                     const contentEl = this._currentAssistantEl?.querySelector('.message-content');
                     if (contentEl) {
-                        contentEl.innerHTML = this._renderMarkdown(this._currentTokens);
+                        // Preserve thinking block, update response after it
+                        const thinkBlock = contentEl.querySelector('.thinking-block');
+                        if (thinkBlock) {
+                            // Find or create a response div after the thinking block
+                            let responseDiv = contentEl.querySelector('.response-content');
+                            if (!responseDiv) {
+                                responseDiv = document.createElement('div');
+                                responseDiv.className = 'response-content';
+                                contentEl.appendChild(responseDiv);
+                            }
+                            responseDiv.innerHTML = this._renderMarkdown(this._currentTokens);
+                        } else {
+                            contentEl.innerHTML = this._renderMarkdown(this._currentTokens);
+                        }
                     }
                     this._scrollToBottom();
                 }
@@ -197,7 +290,19 @@ export class ChatUI {
                     // Re-render final content
                     const contentEl = this._currentAssistantEl.querySelector('.message-content');
                     if (contentEl) {
-                        contentEl.innerHTML = this._renderMarkdown(data.content || this._currentTokens);
+                        const thinkBlock = contentEl.querySelector('.thinking-block');
+                        if (thinkBlock) {
+                            // Keep thinking block, update response
+                            let responseDiv = contentEl.querySelector('.response-content');
+                            if (!responseDiv) {
+                                responseDiv = document.createElement('div');
+                                responseDiv.className = 'response-content';
+                                contentEl.appendChild(responseDiv);
+                            }
+                            responseDiv.innerHTML = this._renderMarkdown(data.content || this._currentTokens);
+                        } else {
+                            contentEl.innerHTML = this._renderMarkdown(data.content || this._currentTokens);
+                        }
                     }
 
                     // Add stats
@@ -221,6 +326,8 @@ export class ChatUI {
                 this._streaming = false;
                 this._currentAssistantEl = null;
                 this._currentTokens = '';
+                this._currentThinking = '';
+                this._thinkingEl = null;
                 this.sendBtn.disabled = false;
                 this._scrollToBottom(true);
 

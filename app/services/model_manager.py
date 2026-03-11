@@ -353,7 +353,14 @@ class ModelManager:
                                     self._load_progress = data["progress"]
                             elif resp.status == 503:
                                 # Server is up but still loading
-                                self._load_progress = 0.5  # indeterminate
+                                progress = data.get("progress", 0)
+                                if progress > 0:
+                                    self._load_progress = progress
+                                else:
+                                    # No progress info — use time-based estimate
+                                    elapsed = loop.time() - (deadline - 120)
+                                    # Asymptotic: approach 0.9 over 120s
+                                    self._load_progress = min(0.9, elapsed / 130)
                 except Exception:
                     pass
 
@@ -373,27 +380,45 @@ class ModelManager:
 
     async def unload_model(self) -> None:
         """Terminate the current llama-server process gracefully."""
-        if self._process is None:
-            return
-
-        try:
-            self._process.terminate()
+        if self._process is not None:
             try:
-                self._process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                log.warning("llama-server did not exit gracefully, killing")
-                self._process.kill()
-                self._process.wait(timeout=5)
-        except ProcessLookupError:
-            pass
-        except Exception as exc:
-            log.error("Error unloading model: %s", exc)
+                self._process.terminate()
+                try:
+                    self._process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    log.warning("llama-server did not exit gracefully, killing")
+                    self._process.kill()
+                    self._process.wait(timeout=5)
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                log.error("Error unloading model: %s", exc)
+            self._process = None
+        else:
+            # No tracked process — kill any llama-server listening on our port
+            self._kill_server_on_port()
 
-        self._process = None
         self._current_model_id = None
         self._load_progress = 0.0
         self._loading = False
+        self._last_error = None
         log.info("Model unloaded")
+
+    def _kill_server_on_port(self) -> None:
+        """Kill any process listening on our server port (handles orphaned servers)."""
+        try:
+            for conn in psutil.net_connections(kind="tcp"):
+                if conn.laddr.port == self._server_port and conn.status == "LISTEN":
+                    proc = psutil.Process(conn.pid)
+                    log.info("Killing orphaned llama-server (PID %d)", conn.pid)
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=10)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                    return
+        except (psutil.NoSuchProcess, psutil.AccessDenied, PermissionError) as exc:
+            log.warning("Could not kill server on port %d: %s", self._server_port, exc)
 
     def get_status(self) -> dict:
         """Get current model loading/running status."""
@@ -411,3 +436,63 @@ class ModelManager:
             "server_url": f"http://127.0.0.1:{self._server_port}" if self._current_model_id else None,
             "error": self._last_error,
         }
+
+    async def recover_state(self) -> None:
+        """Detect if llama-server is running on our port (e.g. after app restart).
+
+        Probes the health endpoint and, if a healthy server is found,
+        recovers _current_model_id from its /v1/models response.
+        """
+        if self._current_model_id or self._loading:
+            return  # Already tracking a model
+
+        import aiohttp
+        health_url = f"http://127.0.0.1:{self._server_port}/health"
+        models_url = f"http://127.0.0.1:{self._server_port}/v1/models"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(health_url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status != 200:
+                        return
+                    data = await resp.json()
+                    if data.get("status") != "ok":
+                        return
+
+                # Server is healthy — figure out which model
+                async with session.get(models_url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    if resp.status == 200:
+                        models_data = await resp.json()
+                        model_id_from_server = None
+                        if models_data.get("data"):
+                            server_model_name = models_data["data"][0].get("id", "")
+                            # Match against registry by filename
+                            for m in self.load_registry():
+                                if Path(m.path).name.lower() in server_model_name.lower():
+                                    model_id_from_server = m.id
+                                    break
+                            # If no exact match, try the first registry model (user probably loaded it)
+                            if not model_id_from_server:
+                                registry = self.load_registry()
+                                if registry:
+                                    # Use file stem matching
+                                    for m in registry:
+                                        if Path(m.path).stem.lower() in server_model_name.lower():
+                                            model_id_from_server = m.id
+                                            break
+
+                        if model_id_from_server:
+                            self._current_model_id = model_id_from_server
+                            self._load_progress = 1.0
+                            self._loading = False
+                            log.info("Recovered running model: %s", model_id_from_server)
+                        else:
+                            # Server running but can't identify model — still mark as connected
+                            # Use first registry model as best guess
+                            registry = self.load_registry()
+                            if registry:
+                                self._current_model_id = registry[0].id
+                                self._load_progress = 1.0
+                                self._loading = False
+                                log.info("Recovered running server, assuming model: %s", registry[0].name)
+        except Exception:
+            pass  # Server not running, that's fine

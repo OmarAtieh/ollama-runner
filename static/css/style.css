@@ -515,6 +515,62 @@ body {
     font-weight: 600;
 }
 
+/* ===== Thinking Block ===== */
+.thinking-block {
+    margin-bottom: 12px;
+    border: 1px solid rgba(199, 146, 234, 0.15);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: rgba(199, 146, 234, 0.03);
+}
+
+.thinking-summary {
+    cursor: pointer;
+    padding: 8px 14px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #c792ea;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.thinking-summary::before {
+    content: '▶';
+    font-size: 8px;
+    transition: transform 0.2s ease;
+}
+
+.thinking-block[open] .thinking-summary::before {
+    transform: rotate(90deg);
+}
+
+.thinking-summary::-webkit-details-marker {
+    display: none;
+}
+
+.thinking-content {
+    padding: 6px 14px 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    border-top: 1px solid rgba(199, 146, 234, 0.1);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.thinking-content p {
+    margin: 0 0 6px 0;
+}
+
+.response-content {
+    margin-top: 4px;
+}
+
 .message-stats {
     font-size: 11px;
     color: var(--text-muted);

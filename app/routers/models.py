@@ -131,6 +131,8 @@ async def unload_model():
 async def get_status():
     """Get current model loading/running status."""
     mm = ModelManager.instance()
+    # Recover state if app restarted but llama-server is still running
+    await mm.recover_state()
     return mm.get_status()
 
 
