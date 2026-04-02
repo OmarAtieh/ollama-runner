@@ -59,10 +59,12 @@ FILE_TYPE_MAP = {
     29: "Q4_0_4_4",
     30: "Q4_0_4_8",
     31: "Q4_0_8_8",
+    32: "Q1_0",
 }
 
 # Known quant patterns for filename fallback (order matters: longest first)
 _QUANT_PATTERNS = [
+    "Q1_0_g128", "Q1_0",
     "IQ2_XXS", "IQ3_XXS", "IQ1_S", "IQ1_M", "IQ2_XS", "IQ2_S",
     "IQ3_S", "IQ4_NL", "IQ4_XS",
     "Q3_K_S", "Q3_K_M", "Q3_K_L",
@@ -89,6 +91,7 @@ _CAPABILITY_PATTERNS = [
     ("embedding", ["embed", "e5-", "bge-"]),
     ("roleplay", ["roleplay", "rp-", "mythomax", "lumimaid"]),
     ("moe", ["-moe-", "-a2b", "-a3b", "-a4b", "mixture"]),
+    ("1bit", ["q1_0", "1-bit", "1bit", "bonsai"]),
 ]
 
 
@@ -133,9 +136,17 @@ def infer_quant_from_filename(filename: str) -> str:
     """Infer quantization type from filename."""
     upper = filename.upper()
     for pat in _QUANT_PATTERNS:
-        if pat in upper:
+        if pat.upper() in upper:
             return pat
     return "unknown"
+
+
+_ONEBIT_QUANTS = {"Q1_0", "Q1_0_G128"}
+
+
+def is_onebit_quant(quant: str) -> bool:
+    """Return True if the quantization type requires the 1-bit fork binary."""
+    return quant.upper() in _ONEBIT_QUANTS
 
 
 def _read_string(f) -> str:
