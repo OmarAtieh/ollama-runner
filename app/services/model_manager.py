@@ -336,10 +336,16 @@ class ModelManager:
             log.error(self._last_error)
             return False
 
-        # Check binary
+        # Select binary variant based on model quantization
         bm = BinaryManager.instance()
-        if not bm.is_available:
-            self._last_error = "llama-server binary not available"
+        variant = self._select_binary_variant(model.path)
+
+        if not bm.is_variant_available(variant):
+            variant_label = "custom (1-bit fork)" if variant == BinaryVariant.CUSTOM else "primary"
+            self._last_error = (
+                f"llama-server binary not available for {variant_label} variant. "
+                + ("Register the custom fork binary via /api/system/binary/register." if variant == BinaryVariant.CUSTOM else "Download the primary binary first.")
+            )
             log.error(self._last_error)
             return False
 
@@ -371,34 +377,31 @@ class ModelManager:
                 self._loading = False
                 return False
 
-            # Build command
-            threads = max(1, (psutil.cpu_count(logical=False) or 2) - 1)
-            cmd = [
-                str(bm.binary_path),
-                "-m", model.path,
-                "-c", str(ctx),
-                "-ngl", str(gpu_layers),
-                "--host", "127.0.0.1",
-                "--port", str(self._server_port),
-                "-fa", "on",
-                "--mlock",
-                "-t", str(threads),
-                "--batch-size", "512",
-                "--ubatch-size", "512",
-            ]
+            # Build optimized command and environment
+            binary_path = bm.binary_path_for(variant)
+            cmd = self._build_launch_cmd(model, binary_path, gpu_layers, ctx)
+            env = self._build_launch_env()
 
-            # Windows-specific: disable mmap (slower with CUDA on Windows)
-            if platform.system() == "Windows":
-                cmd.append("--no-mmap")
-
-            log.info("Starting llama-server: %s", " ".join(cmd))
+            log.info("Starting llama-server (%s): %s", variant.value, " ".join(cmd))
 
             self._process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
+                env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
             )
+
+            # Elevate process priority for lower latency
+            try:
+                import psutil as _psutil
+                p = _psutil.Process(self._process.pid)
+                if platform.system() == "Windows":
+                    p.nice(_psutil.HIGH_PRIORITY_CLASS)
+                else:
+                    p.nice(-10)
+            except Exception:
+                pass  # non-critical
 
             # Poll health endpoint for readiness (2 min timeout)
             health_url = f"http://127.0.0.1:{self._server_port}/health"
