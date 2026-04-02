@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import platform
 import subprocess
 import sys
@@ -16,8 +17,13 @@ import aiohttp
 import psutil
 
 from app.config import APP_DIR, MODELS_DIR, load_config
-from app.services.binary_manager import BinaryManager
-from app.services.model_scanner import infer_capabilities, read_gguf_metadata
+from app.services.binary_manager import BinaryManager, BinaryVariant
+from app.services.model_scanner import (
+    infer_capabilities,
+    infer_quant_from_filename,
+    is_onebit_quant,
+    read_gguf_metadata,
+)
 from app.services.system_monitor import SystemMonitor
 
 log = logging.getLogger(__name__)
@@ -237,6 +243,85 @@ class ModelManager:
         recommended = int(vram_budget / layer_size)
         # Clamp to total layers
         return min(recommended, total_layers)
+
+    # -- Launch helpers ------------------------------------------------------
+
+    def _select_binary_variant(self, model_path: str) -> BinaryVariant:
+        """Determine which binary variant to use.
+
+        Logic:
+        - 1-bit models REQUIRE the custom binary
+        - If a custom binary is registered, prefer it for all models
+          (it includes all upstream features + optimizations)
+        - Otherwise fall back to primary
+        """
+        bm = BinaryManager.instance()
+
+        # 1-bit models must use custom
+        meta = read_gguf_metadata(Path(model_path))
+        quant = meta.quantization if meta else infer_quant_from_filename(Path(model_path).name)
+        if is_onebit_quant(quant):
+            return BinaryVariant.CUSTOM
+
+        # Prefer custom for all models when available (it's a superset)
+        if bm.is_variant_available(BinaryVariant.CUSTOM):
+            return BinaryVariant.CUSTOM
+
+        return BinaryVariant.PRIMARY
+
+    def _build_launch_cmd(
+        self,
+        model: ModelConfig,
+        binary_path: Path,
+        gpu_layers: int,
+        context_length: int,
+    ) -> list[str]:
+        """Build the llama-server command with all optimized flags."""
+        # Smart thread count: 1 when fully offloaded, multi otherwise
+        fully_offloaded = gpu_layers >= 99
+        threads = 1 if fully_offloaded else max(1, (psutil.cpu_count(logical=False) or 2) - 1)
+
+        cmd = [
+            str(binary_path),
+            "-m", model.path,
+            "-c", str(context_length),
+            "-ngl", str(gpu_layers),
+            "--host", "127.0.0.1",
+            "--port", str(self._server_port),
+            "-fa", "on",
+            "--mlock",
+            "-t", str(threads),
+            "--batch-size", "512",
+            "--ubatch-size", "512",
+        ]
+
+        # KV cache quantization
+        if model.cache_type_k != "f16":
+            cmd.extend(["--cache-type-k", model.cache_type_k])
+        if model.cache_type_v != "f16":
+            cmd.extend(["--cache-type-v", model.cache_type_v])
+
+        # Speculative decoding
+        if model.speculative == "ngram":
+            cmd.extend([
+                "--spec-type", "ngram-mod",
+                "--spec-ngram-size-n", "12",
+                "--spec-ngram-size-m", "48",
+                "--draft-max", "16",
+            ])
+
+        # Windows-specific
+        if platform.system() == "Windows":
+            cmd.append("--no-mmap")
+
+        return cmd
+
+    def _build_launch_env(self) -> dict[str, str]:
+        """Build environment variables for the llama-server process."""
+        env = os.environ.copy()
+        env["GGML_CUDA_GRAPH_OPT"] = "1"
+        env["CUDA_SCALE_LAUNCH_QUEUES"] = "4x"
+        return env
 
     # -- Model loading / unloading -------------------------------------------
 
