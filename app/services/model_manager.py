@@ -36,6 +36,9 @@ class ModelConfig:
     top_p: float = 0.9
     repeat_penalty: float = 1.1
     notes: str = ""
+    cache_type_k: str = "f16"     # KV cache key type: f16, q8_0, q4_0, tbq3_0, tbq4_0
+    cache_type_v: str = "f16"     # KV cache value type: f16, q8_0, q4_0, tbq3_0, tbq4_0
+    speculative: str = "none"     # none, ngram
     capabilities: list[str] = field(default_factory=list)
 
 

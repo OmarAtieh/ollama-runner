@@ -28,6 +28,9 @@ class AddModelRequest(BaseModel):
     repeat_penalty: float = 1.1
     notes: str = ""
     capabilities: list[str] = Field(default_factory=list)
+    cache_type_k: str = "f16"
+    cache_type_v: str = "f16"
+    speculative: str = "none"
 
 
 class UpdateModelRequest(BaseModel):
@@ -41,6 +44,9 @@ class UpdateModelRequest(BaseModel):
     repeat_penalty: Optional[float] = None
     notes: Optional[str] = None
     capabilities: Optional[list[str]] = None
+    cache_type_k: Optional[str] = None
+    cache_type_v: Optional[str] = None
+    speculative: Optional[str] = None
 
 
 class LoadModelRequest(BaseModel):
