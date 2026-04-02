@@ -127,10 +127,11 @@ class TestDownloadAndInstall:
             zf.writestr("build/bin/cuda.dll", b"FAKE_DLL")
         zip_bytes = zip_buf.getvalue()
 
-        # Mock get_latest_release_url
+        # Mock get_latest_release_url and _get_cudart_url
         bm.get_latest_release_url = AsyncMock(
             return_value="https://example.com/fake.zip"
         )
+        bm._get_cudart_url = AsyncMock(return_value=None)
 
         # Mock aiohttp download — deliver the zip in one chunk
         mock_response = AsyncMock()
