@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.services.system_monitor import SystemMonitor
 from app.services.binary_manager import BinaryManager, BinaryVariant
+from app.services.system_optimizer import SystemOptimizer
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -70,3 +71,18 @@ async def register_binary(req: RegisterBinaryRequest):
         raise HTTPException(status_code=500, detail="Failed to register binary")
 
     return bm.get_status()
+
+
+@router.get("/optimizations")
+async def get_optimizations():
+    """Check system optimization status."""
+    return SystemOptimizer.get_optimization_status()
+
+
+@router.get("/optimizations/defender-commands")
+async def get_defender_commands():
+    """Get PowerShell commands to configure Defender exclusions."""
+    return {
+        "commands": SystemOptimizer.get_defender_exclusion_commands(),
+        "instructions": "Run these commands in an Administrator PowerShell window.",
+    }
