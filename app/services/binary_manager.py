@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import enum
 import logging
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -11,6 +13,19 @@ import aiohttp
 from app.config import BIN_DIR
 
 log = logging.getLogger(__name__)
+
+
+class BinaryVariant(enum.Enum):
+    """Supported llama-server binary variants."""
+    PRIMARY = "primary"   # upstream llama.cpp (auto-downloaded)
+    CUSTOM = "custom"     # user-provided optimized fork
+
+
+_VARIANT_SUBDIRS: dict[BinaryVariant, str | None] = {
+    BinaryVariant.PRIMARY: None,     # lives at bin root
+    BinaryVariant.CUSTOM: "custom",  # lives at bin/custom/
+}
+
 
 GITHUB_LATEST_RELEASE_URL = (
     "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
@@ -35,6 +50,45 @@ class BinaryManager:
             cls._instance = cls()
         return cls._instance
 
+    # -- Variant helpers -----------------------------------------------------
+
+    def _variant_dir(self, variant: BinaryVariant) -> Path:
+        """Return the directory for a given variant."""
+        subdir = _VARIANT_SUBDIRS[variant]
+        if subdir is None:
+            return self._bin_dir
+        return self._bin_dir / subdir
+
+    def binary_path_for(self, variant: BinaryVariant) -> Path:
+        """Return the expected binary path for a given variant."""
+        return self._variant_dir(variant) / "llama-server.exe"
+
+    def is_variant_available(self, variant: BinaryVariant) -> bool:
+        """Check if a variant's binary exists."""
+        return self.binary_path_for(variant).exists()
+
+    def register_binary(self, variant: BinaryVariant, source_path: Path) -> bool:
+        """Copy a user-provided binary (and sibling DLLs) into the variant's directory.
+        Returns True on success."""
+        if not source_path.exists():
+            log.error("Source binary does not exist: %s", source_path)
+            return False
+
+        dest_dir = self._variant_dir(variant)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Copy the exe
+            shutil.copy2(source_path, dest_dir / source_path.name)
+            # Copy sibling DLLs
+            for dll in source_path.parent.glob("*.dll"):
+                shutil.copy2(dll, dest_dir / dll.name)
+            log.info("Registered %s binary from %s", variant.value, source_path)
+            return True
+        except Exception as exc:
+            log.error("Failed to register %s binary: %s", variant.value, exc)
+            return False
+
     # -- Properties ----------------------------------------------------------
 
     @property
@@ -56,11 +110,18 @@ class BinaryManager:
     # -- Public API ----------------------------------------------------------
 
     def get_status(self) -> dict:
+        variants = {}
+        for v in BinaryVariant:
+            variants[v.value] = {
+                "available": self.is_variant_available(v),
+                "path": str(self.binary_path_for(v)),
+            }
         return {
             "available": self.is_available,
             "path": str(self._binary_path),
             "status": self._download_status,
             "progress": self._download_progress,
+            "variants": variants,
         }
 
     def _detect_cuda_version(self) -> str:

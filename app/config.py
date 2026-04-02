@@ -5,6 +5,7 @@ from pathlib import Path
 APP_DIR = Path.home() / ".ollamarunner"
 MODELS_DIR = Path.home() / ".lmstudio" / "models"
 BIN_DIR = APP_DIR / "bin"
+CUSTOM_BIN_DIR = BIN_DIR / "custom"
 SESSIONS_DIR = APP_DIR / "sessions"
 
 DEFAULT_CONFIG = {
