@@ -95,30 +95,61 @@ jobs:
         id: turboquant
         run: |
           cd llama-cpp-build
-          # Fetch PR #21089 (TurboQuant TBQ3_0/TBQ4_0)
-          git fetch origin pull/21089/head:turboquant-pr 2>$null
+          # Use spiritbuun's fork which has MSVC-compatible TurboQuant CUDA implementation
+          # (includes Windows MSVC fix: GGML_API linkage on turbo quant declarations)
+          git remote add turboquant-cuda https://github.com/spiritbuun/llama-cpp-turboquant-cuda.git
+          git fetch turboquant-cuda main --depth=100 2>$null
           if ($LASTEXITCODE -eq 0) {
             try {
-              git cherry-pick --no-commit turboquant-pr 2>$null
+              # Get the diff between upstream and the turboquant fork
+              git merge --no-commit --no-ff turboquant-cuda/main --allow-unrelated-histories 2>$null
               if ($LASTEXITCODE -ne 0) {
-                echo "::warning::TurboQuant PR could not be cherry-picked cleanly. Skipping."
-                git cherry-pick --abort 2>$null
+                # Merge conflict — try cherry-picking individual commits
+                git merge --abort 2>$null
                 git checkout -- .
-                echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
-                exit 0
+
+                # Get turboquant-specific commits (not upstream)
+                $tqCommits = git log --oneline --reverse "HEAD..turboquant-cuda/main" --grep="turbo" --grep="TBQ" --grep="tbq" 2>$null
+                if ($tqCommits) {
+                  $shas = ($tqCommits | ForEach-Object { $_.Split(' ')[0] })
+                  $applied = $false
+                  foreach ($sha in $shas) {
+                    git cherry-pick --no-commit $sha 2>$null
+                    if ($LASTEXITCODE -ne 0) {
+                      git cherry-pick --abort 2>$null
+                      git checkout -- .
+                    } else {
+                      $applied = $true
+                    }
+                  }
+                  if ($applied) {
+                    git add -A
+                    git commit -m "Apply TurboQuant CUDA patches from spiritbuun fork" --allow-empty
+                    echo "TURBOQUANT_APPLIED=true" >> $env:GITHUB_ENV
+                    echo "TurboQuant patches applied successfully (spiritbuun fork)"
+                  } else {
+                    echo "::warning::TurboQuant commits could not be cherry-picked. Skipping."
+                    echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
+                  }
+                } else {
+                  echo "::warning::No TurboQuant-specific commits found. Skipping."
+                  echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
+                }
+              } else {
+                git add -A
+                git commit -m "Apply TurboQuant CUDA patches from spiritbuun fork" --allow-empty
+                echo "TURBOQUANT_APPLIED=true" >> $env:GITHUB_ENV
+                echo "TurboQuant patches applied successfully (spiritbuun fork, merge)"
               }
-              git add -A
-              git commit -m "Apply TurboQuant TBQ3_0/TBQ4_0 patches" --allow-empty
-              echo "TURBOQUANT_APPLIED=true" >> $env:GITHUB_ENV
-              echo "TurboQuant patches applied successfully"
             } catch {
-              echo "::warning::TurboQuant patch failed. Skipping."
+              echo "::warning::TurboQuant patch application failed. Skipping."
+              git merge --abort 2>$null
               git cherry-pick --abort 2>$null
               git checkout -- .
               echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
             }
           } else {
-            echo "::warning::Could not fetch TurboQuant PR. Skipping."
+            echo "::warning::Could not fetch spiritbuun TurboQuant fork. Skipping."
             echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
           }
 
