@@ -1,0 +1,194 @@
+name: Build Custom llama-server (Turing-optimized)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llama_cpp_ref:
+        description: 'llama.cpp ref to build (tag, branch, or SHA)'
+        required: false
+        default: 'master'
+      apply_prismml:
+        description: 'Apply PrismML 1-bit patches'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+      apply_turboquant:
+        description: 'Apply TurboQuant TBQ3/4 patches'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      CUDA_VERSION: '12.4.0'
+
+    steps:
+      - name: Checkout OllamaRunner
+        uses: actions/checkout@v4
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.21
+        id: cuda-toolkit
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "nvrtc", "nvrtc_dev", "thrust", "visual_studio_integration"]'
+
+      - name: Clone llama.cpp
+        run: |
+          git clone https://github.com/ggml-org/llama.cpp.git llama-cpp-build
+          cd llama-cpp-build
+          git checkout ${{ github.event.inputs.llama_cpp_ref || 'master' }}
+          echo "LLAMA_SHA=$(git rev-parse --short HEAD)" >> $env:GITHUB_ENV
+          echo "LLAMA_REF=$(git describe --tags --always)" >> $env:GITHUB_ENV
+
+      - name: Apply PrismML 1-bit patches (Q1_0_g128)
+        if: ${{ github.event.inputs.apply_prismml != 'false' }}
+        continue-on-error: true
+        id: prismml
+        run: |
+          cd llama-cpp-build
+          git remote add prismml https://github.com/PrismML-Eng/llama.cpp.git
+          git fetch prismml prism --depth=50
+          # Cherry-pick the Q1_0_g128 commits from PrismML's prism branch
+          # Get commits that differ from upstream master
+          $commits = git log --oneline --reverse "HEAD..prismml/prism" -- "ggml/src" "ggml/include" "src" "common" 2>$null
+          if ($commits) {
+            echo "Found PrismML commits to apply:"
+            echo $commits
+            try {
+              git cherry-pick --no-commit prismml/prism -- ggml/src ggml/include src common 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                # If cherry-pick fails, try a merge approach
+                git checkout -- .
+                git merge --no-commit --no-ff prismml/prism --allow-unrelated-histories 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                  echo "::warning::PrismML patches could not be applied cleanly. Skipping."
+                  git merge --abort 2>$null
+                  git checkout -- .
+                  echo "PRISMML_APPLIED=false" >> $env:GITHUB_ENV
+                  exit 0
+                }
+              }
+              git add -A
+              git commit -m "Apply PrismML Q1_0_g128 patches" --allow-empty
+              echo "PRISMML_APPLIED=true" >> $env:GITHUB_ENV
+              echo "PrismML patches applied successfully"
+            } catch {
+              echo "::warning::PrismML patch application failed. Skipping."
+              git cherry-pick --abort 2>$null
+              git checkout -- .
+              echo "PRISMML_APPLIED=false" >> $env:GITHUB_ENV
+            }
+          } else {
+            echo "::warning::No PrismML-specific commits found."
+            echo "PRISMML_APPLIED=false" >> $env:GITHUB_ENV
+          }
+
+      - name: Apply TurboQuant patches (TBQ3_0/TBQ4_0)
+        if: ${{ github.event.inputs.apply_turboquant != 'false' }}
+        continue-on-error: true
+        id: turboquant
+        run: |
+          cd llama-cpp-build
+          # Fetch PR #21089 (TurboQuant TBQ3_0/TBQ4_0)
+          git fetch origin pull/21089/head:turboquant-pr 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            try {
+              git cherry-pick --no-commit turboquant-pr 2>$null
+              if ($LASTEXITCODE -ne 0) {
+                echo "::warning::TurboQuant PR could not be cherry-picked cleanly. Skipping."
+                git cherry-pick --abort 2>$null
+                git checkout -- .
+                echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
+                exit 0
+              }
+              git add -A
+              git commit -m "Apply TurboQuant TBQ3_0/TBQ4_0 patches" --allow-empty
+              echo "TURBOQUANT_APPLIED=true" >> $env:GITHUB_ENV
+              echo "TurboQuant patches applied successfully"
+            } catch {
+              echo "::warning::TurboQuant patch failed. Skipping."
+              git cherry-pick --abort 2>$null
+              git checkout -- .
+              echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
+            }
+          } else {
+            echo "::warning::Could not fetch TurboQuant PR. Skipping."
+            echo "TURBOQUANT_APPLIED=false" >> $env:GITHUB_ENV
+          }
+
+      - name: Build llama-server (Turing-optimized)
+        run: |
+          cd llama-cpp-build
+          cmake -B build `
+            -DGGML_CUDA=ON `
+            -DCMAKE_CUDA_ARCHITECTURES=75 `
+            -DGGML_CUDA_FA_ALL_QUANTS=ON `
+            -DGGML_NATIVE=OFF `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DLLAMA_BUILD_TESTS=OFF `
+            -DLLAMA_BUILD_EXAMPLES=OFF `
+            -DLLAMA_BUILD_SERVER=ON
+          cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS --target llama-server
+
+      - name: Collect artifacts
+        run: |
+          mkdir artifact
+          # Copy llama-server.exe and all DLLs from the build output
+          $buildBin = "llama-cpp-build/build/bin/Release"
+          if (Test-Path $buildBin) {
+            Copy-Item "$buildBin/llama-server.exe" artifact/
+            Copy-Item "$buildBin/*.dll" artifact/ -ErrorAction SilentlyContinue
+          } else {
+            # Try alternate build paths
+            $found = Get-ChildItem -Path "llama-cpp-build/build" -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+            if ($found) {
+              Copy-Item $found.FullName artifact/
+              Copy-Item (Join-Path $found.DirectoryName "*.dll") artifact/ -ErrorAction SilentlyContinue
+            } else {
+              echo "::error::llama-server.exe not found in build output"
+              exit 1
+            }
+          }
+
+          # Write build manifest
+          @{
+            llama_cpp_ref = "${{ github.event.inputs.llama_cpp_ref || 'master' }}"
+            llama_cpp_sha = "$env:LLAMA_SHA"
+            cuda_version = "${{ env.CUDA_VERSION }}"
+            cuda_arch = "sm_75 (Turing)"
+            fa_all_quants = $true
+            prismml_applied = "$env:PRISMML_APPLIED" -eq "true"
+            turboquant_applied = "$env:TURBOQUANT_APPLIED" -eq "true"
+            build_date = (Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")
+          } | ConvertTo-Json | Out-File artifact/build-manifest.json
+
+          echo "=== Build Manifest ==="
+          Get-Content artifact/build-manifest.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-server-turing-cuda${{ env.CUDA_VERSION }}
+          path: artifact/
+          retention-days: 90
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifact/*
+          body: |
+            Custom llama-server build for RTX 2070 (Turing, sm_75)
+
+            **Base:** llama.cpp `${{ env.LLAMA_REF }}` (${{ env.LLAMA_SHA }})
+            **CUDA:** ${{ env.CUDA_VERSION }}
+            **Arch:** sm_75 (Turing)
+            **FA All Quants:** Yes
+            **PrismML 1-bit:** ${{ env.PRISMML_APPLIED }}
+            **TurboQuant:** ${{ env.TURBOQUANT_APPLIED }}
