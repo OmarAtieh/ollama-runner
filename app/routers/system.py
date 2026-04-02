@@ -1,11 +1,13 @@
 """System resource monitoring and binary management endpoints."""
 
 from dataclasses import asdict
+from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 
 from app.services.system_monitor import SystemMonitor
-from app.services.binary_manager import BinaryManager
+from app.services.binary_manager import BinaryManager, BinaryVariant
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -40,3 +42,31 @@ async def binary_download(background_tasks: BackgroundTasks):
     asyncio.create_task(_do_download())
     # Return immediately so the UI can poll status
     return {"message": "Download started", **bm.get_status()}
+
+
+class RegisterBinaryRequest(BaseModel):
+    variant: str
+    source_path: str
+
+
+@router.post("/binary/register")
+async def register_binary(req: RegisterBinaryRequest):
+    """Register a user-provided llama-server binary for a variant."""
+    try:
+        variant = BinaryVariant(req.variant)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown variant: {req.variant}. Valid: {[v.value for v in BinaryVariant]}",
+        )
+
+    source = Path(req.source_path)
+    if not source.exists():
+        raise HTTPException(status_code=400, detail=f"Source file not found: {req.source_path}")
+
+    bm = BinaryManager.instance()
+    success = bm.register_binary(variant, source)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to register binary")
+
+    return bm.get_status()
